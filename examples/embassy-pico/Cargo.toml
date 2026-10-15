@@ -1,0 +1,28 @@
+[package]
+name = "cyw43-iso-embassy-pico"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+cyw43-iso-embassy-example = { path = "../embassy", default-features = false, features = ["runtime-installer"] }
+cyw43 = { version = "=0.7.0", features = ["bluetooth", "defmt"] }
+cyw43-pio = "=0.10.0"
+embassy-rp = { version = "=0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
+embassy-executor = { version = "=0.10.0", features = ["platform-cortex-m", "executor-thread"] }
+embassy-time = { version = "0.5.1", features = ["defmt-timestamp-uptime"] }
+bt-hci = "0.8"
+defmt = "1"
+defmt-rtt = { version = "1", features = ["disable-blocking-mode"] }
+panic-probe = { version = "1", features = ["print-defmt"] }
+cortex-m-rt = "0.7"
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+[profile.release]
+opt-level = "s"
+debug = 2
+lto = true
+codegen-units = 1

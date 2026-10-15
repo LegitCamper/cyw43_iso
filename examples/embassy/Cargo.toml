@@ -1,0 +1,19 @@
+[package]
+name = "cyw43-iso-embassy-example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["transport"]
+transport = ["dep:cyw43-iso-re"]
+runtime-installer = ["dep:embedded-hal", "dep:embassy-time"]
+
+[dependencies]
+cyw43-iso-re = { path = "../..", optional = true, default-features = false, features = ["embassy", "lc3"] }
+cyw43 = { version = "0.7", features = ["bluetooth"] }
+embedded-hal = { version = "1", optional = true }
+embassy-time = { version = "0.5.1", optional = true }
+
+[lib]
+path = "lib.rs"
