@@ -13,9 +13,11 @@ only the resident clone's slot `+0x24`, after calling stock phase setup.
 
 The replacement callback always calls stock first and validates event
 `0x209788`, parameters `0x2097b8`, and RX mode. Before marker synchronization,
-every accepted callback advances the 16-bit candidate event counter once and
-retunes to its CSA#2 channel. Existing static timing evidence associates these
-callbacks with nominal 625-us ticks. This fast diagnostic scan tries 32 CSA#2
+every accepted callback advances the 16-bit candidate event counter once,
+retunes to its CSA#2 channel, and then re-executes the stock RX arming
+sequence at ROM `0x714a4` so the receiver restarts on the new channel.
+Existing static timing evidence associates these callbacks with nominal
+625-us ticks. This fast diagnostic scan tries 32 CSA#2
 event candidates during one nominal 20-ms transmitter interval instead of
 waiting 20 ms on one wrong channel.
 
@@ -31,6 +33,12 @@ After synchronization, callbacks stop scanning. They decrement the 32-tick
 countdown and advance exactly one CSA#2 event at zero, preserving the marker
 synchronization word and scan count across 16-bit event-counter wrap. Receive
 callbacks never perform a post-acquisition event advance.
+
+Both retune paths first require event byte `+0x0f` to equal 1, the same
+currency condition stock RX processing uses before arming. A tick that fails it
+is still counted and still advances the countdown, and at a countdown boundary
+it advances the event counter, but it performs no channel write and no rearm.
+The receiver is therefore never reprogrammed while the event is not current.
 
 This is marker-fixture acquisition, not BIGInfo-derived anchor synchronization.
 It assumes the received marker index identifies the current transmitter event
@@ -54,7 +62,8 @@ uv run --quiet --with unicorn python analysis/check-controller-rx.py \
 ```
 
 Unicorn checks stock countdown chaining, callback guards, one CSA#2 scan retune
-per accepted unsynchronized tick, rejection of a non-marker payload, one-shot
+plus one stock RX rearm per accepted unsynchronized tick, counter-only ticks
+with no radio write while the event is not current, rejection of a non-marker payload, one-shot
 acquisition from a valid marker, acquisition configuration accounting, 32-tick
 phase reset, interrupt-mask restoration, no RX-driven advance, exactly one
 post-acquisition advance per 32 accepted ticks, and synchronized 16-bit counter
@@ -63,7 +72,7 @@ event-zero CSA#2 configuration and installation of the resident countdown
 callback.
 
 Generated image SHA-256 is
-`5657f8bad24d5987d67788d46d79173b35a8f0ffbf84c69b9be34edbf0d43090`.
+`7272b1bfa277c7c1ccd20a3381a1069a131b4e6a4f573434da4cd605b4630419`.
 Allocator SHA-256 is
 `dc1c2dfabb13f4a8de26ab8328de4def56944d2d646bbe65cf201295bdbc4d47`.
 
@@ -96,11 +105,25 @@ Trace accounting was exact in every run: `A = S`, `V = 0`, `T = 32`,
 `Q = 1 + S`, and the reported channel equalled CSA#2 of the reported counter.
 The defect is in radio arming, not in the counter, scan, or trace logic.
 
-Next step is to stop retuning from the timer context. Keep the countdown
-callback as a clock that only advances the event counter, and apply the channel
-change where the packet-driven image already proved it safe, after the stock
-receive callback rearms. Only BIGInfo-derived anchor and interval handling can
-promote that to broadcast synchronization.
+### Root cause and the rearm fix
+
+Static ROM evidence explains the result exactly. Stock countdown `0x713fc`
+returns immediately in RX mode: at `0x71416..0x7141e` it loads parameters `+6`
+and pops when that byte is nonzero. Its countdown decrement and the
+`0x318014` self-write repeat trigger are TX-only. All RX arming lives in
+receive processing `0x7143e`, at `0x714a4..0x714ca`: it clears bit 7 of
+`0x318014`, runs stock settle delay `0x1711a(2)`, sets `0x2000000` in
+`0x31801c`, and writes bit 7 of `0x318014` back. Retuning from the countdown
+callback therefore changed channel registers without any arming, which matches
+zero deliveries across every scan candidate.
+
+The image now calls that exact ROM arming sequence, reusing the code at
+`0x714a5` with the event in `r4`, immediately after each timer-context retune.
+Nothing is reimplemented and no new MMIO write is introduced; the same three
+register operations stock performs after a receive now also follow a timer
+retune. Live validation of this version is still outstanding, and only
+BIGInfo-derived anchor and interval handling can promote marker acquisition to
+broadcast synchronization.
 
 Hardware restoration: each run passed two stock capability checks with LMP
 `0x2310`, and the marker and fixed-channel runs restored Nordic RRAM

@@ -354,16 +354,28 @@ timer_countdown:
     ldrb r5,[r5,#6]
     cmp r5,#1
     bne timer_done
+    mov r7,r4
     adr r4,hop_trace
     ldr r5,[r4,#16]
     adds r5,#1
     str r5,[r4,#16]
     ldr r5,[r4,#24]
     cbnz r5,timer_synchronized
+    ldrb r5,[r7,#15]
+    cmp r5,#1
+    bne timer_count_only
     bl hop_advance
+    mov r0,r7
+    bl timer_rearm
     ldr r5,[r4,#28]
     adds r5,#1
     str r5,[r4,#28]
+    b timer_done
+timer_count_only:
+    ldr r5,[r4]
+    adds r5,#1
+    uxth r5,r5
+    str r5,[r4]
     b timer_done
 timer_synchronized:
     ldr r5,[r4,#12]
@@ -372,16 +384,27 @@ timer_synchronized:
     bne timer_done
     movs r5,#32
     str r5,[r4,#12]
+    ldrb r5,[r7,#15]
+    cmp r5,#1
+    bne timer_count_only
     bl hop_advance
+    mov r0,r7
+    bl timer_rearm
     ldr r5,[r4,#20]
     adds r5,#1
     str r5,[r4,#20]
 timer_done:
     pop {r4-r8,pc}
+.thumb_func
+timer_rearm:
+    push {r4,r5,r6,lr}
+    mov r4,r0
+    ldr.w pc,stock_rx_rearm
     .balign 4
 stock_countdown: .word 0x000713fd
 timer_event: .word 0x00209788
 timer_parameters: .word 0x002097b8
+stock_rx_rearm: .word 0x000714a5
     .space 1280-(.-hook),0
 .thumb_func
 configure_channel:

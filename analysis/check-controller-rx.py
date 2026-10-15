@@ -355,7 +355,8 @@ def build(bis=False, iso=False, stream=False, hop=False, timer_hop=False):
                     assert values[name] == base + offset, name
             if timer_hop:
                 for name, offset in (("hop_advance", 1024), ("hop_timer_initial", 1050), ("hop_trace", 1100),
-                                     ("timer_countdown", 1132), ("configure_channel", 1280), ("bis_channel", 1408),
+                                     ("timer_countdown", 1132), ("timer_rearm", 1250),
+                                     ("configure_channel", 1280), ("bis_channel", 1408),
                                      ("marker_acquire", 1536)):
                     assert values[name] == base + offset, name
         size = 2048 if hop or timer_hop else 1024 if bis else 512
@@ -375,7 +376,8 @@ def build(bis=False, iso=False, stream=False, hop=False, timer_hop=False):
                 assert blob[1400:] == bytes(648)
             if timer_hop:
                 assert blob[1132:1134] != bytes(2)
-                assert blob[1244:1280] == bytes(36)
+                assert struct.unpack_from("<I", blob, 1272)[0] == 0x714A5, "stock RX rearm literal"
+                assert blob[1276:1280] == bytes(4)
                 assert blob[1348:1408] == bytes(60)
                 assert blob[1528:1536] == bytes(8)
         else:
@@ -710,17 +712,35 @@ def emulate_timer_hop(blob):
     cpu.mem_write(base, blob)
     cpu.mem_map(0x318000, 0x1000)
     cpu.mem_write(event + 28, struct.pack("<I", params))
+    cpu.mem_write(event + 15, b"\x01")
     cpu.mem_write(params + 6, b"\x01")
+    cpu.mem_write(0x318014, struct.pack("<I", 0x123456F8))
+    cpu.mem_write(0x31801C, struct.pack("<I", 0x23456789))
     first_channel = csa2_channel(0)
     cpu.mem_write(trace, struct.pack("<8I", 0, first_channel, 1, 32, 0, 0, 0, 0))
     cpu.mem_write(0x318BF4, struct.pack("<I", first_channel))
     cpu.mem_write(0x3186A4, struct.pack("<I", rf_selector(first_channel)))
-    stock_calls, writes = [], []
+    stock_calls, delay_calls, writes = [], [], []
+
+    def rearm_writes():
+        armed = struct.unpack("<I", cpu.mem_read(0x318014, 4))[0]
+        trigger = struct.unpack("<I", cpu.mem_read(0x31801C, 4))[0]
+        return [(0x318014, 4, armed & ~0x80), (0x31801C, 4, trigger | 0x2000000),
+                (0x318014, 4, armed | 0x80)]
+
+    def retune(channel, rearm=True):
+        updates = [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+        return updates + (rearm_writes() if rearm else [])
 
     def code(machine, address, _size, _user):
-        if address != 0x713FC:
+        if address == 0x713FC:
+            stock_calls.append(machine.reg_read(arm.UC_ARM_REG_R0))
+        elif address == 0x1711A:
+            # Stock settle delay; its duration is not emulated.
+            delay_calls.append(machine.reg_read(arm.UC_ARM_REG_R0))
+            assert machine.reg_read(arm.UC_ARM_REG_SP) % 8 == 0
+        else:
             return
-        stock_calls.append(machine.reg_read(arm.UC_ARM_REG_R0))
         machine.reg_write(arm.UC_ARM_REG_PC, machine.reg_read(arm.UC_ARM_REG_LR))
 
     def memory(_machine, access, address, size, value, _user):
@@ -730,8 +750,9 @@ def emulate_timer_hop(blob):
     cpu.hook_add(un.UC_HOOK_CODE, code)
     cpu.hook_add(un.UC_HOOK_MEM_WRITE, memory)
 
-    def tick(argument=event, mode=1):
+    def tick(argument=event, mode=1, current=True):
         cpu.mem_write(params + 6, bytes([mode]))
+        cpu.mem_write(event + 15, bytes([1 if current else 0]))
         incoming = [0x11000000 + i * 0x101 for i in range(13)]
         incoming[0] = argument
         for register, value in zip(registers, incoming):
@@ -773,15 +794,14 @@ def emulate_timer_hop(blob):
     assert tick(mode=0) == [] and bytes(cpu.mem_read(trace, 32)) == initial
     for candidate in range(1, 6):
         channel = csa2_channel(candidate)
-        assert tick() == [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+        assert tick() == retune(channel)
         assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (
             candidate, channel, candidate + 1, 32, candidate, 0, 0, candidate)
     before_acquire = bytes(cpu.mem_read(trace, 32))
     assert acquire(0xFFFE, valid=False) == []
     assert bytes(cpu.mem_read(trace, 32)) == before_acquire
     channel = csa2_channel(0xFFFE)
-    assert acquire(0xFFFE, primask=1) == [
-        (0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+    assert acquire(0xFFFE, primask=1) == retune(channel, rearm=False)
     assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (0xFFFE, channel, 7, 32, 5, 0, 1, 5)
     acquired = bytes(cpu.mem_read(trace, 32))
     assert acquire(42) == [] and bytes(cpu.mem_read(trace, 32)) == acquired
@@ -789,15 +809,25 @@ def emulate_timer_hop(blob):
         updates = tick()
         if index in (31, 63):
             counter = (0xFFFF + index // 32) & 0xFFFF
-            expected_channel = csa2_channel(counter)
-            assert updates == [(0x318BF4, 4, expected_channel),
-                               (0x3186A4, 4, rf_selector(expected_channel))]
+            assert updates == retune(csa2_channel(counter))
         else:
             assert updates == []
     channel = csa2_channel(0)
     assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (0, channel, 9, 32, 69, 2, 1, 5)
     assert stock_calls == [0x209000] + [event] * 70
-    print("Timer-hop assembly passes: per-tick unsynchronized CSA#2 scanning, marker-only first-packet acquisition, phase reset, 32-tick synchronized advance, guards, one-shot sync and synced 16-bit wrap.")
+    assert delay_calls == [2] * 7, "one stock RX rearm settle delay per timer retune"
+    before = struct.unpack("<8I", cpu.mem_read(trace, 32))
+    for index in range(32):
+        assert tick(current=False) == [], "no radio writes while the event is not current"
+        after = struct.unpack("<8I", cpu.mem_read(trace, 32))
+        assert after[4] == before[4] + index + 1, "callback still counted"
+        assert after[1:3] == before[1:3], "channel untouched without rearm"
+        assert after[5:] == before[5:], "sync and scan telemetry preserved"
+        boundary = index == 31
+        assert after[0] == (before[0] + boundary) & 0xFFFF, "counter advances only at a boundary"
+        assert after[3] == (32 if boundary else 31 - index)
+    assert delay_calls == [2] * 7, "a non-current tick performs no rearm"
+    print("Timer-hop assembly passes: per-tick unsynchronized CSA#2 scanning with stock RX rearm after every timer retune, marker-only first-packet acquisition, phase reset, 32-tick synchronized advance, guards, counter-only ticks while the event is not current, one-shot sync and synced 16-bit wrap.")
 
 
 def export_blob(directory, blob, stream=False, hop=False, timer_hop=False):
