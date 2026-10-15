@@ -158,13 +158,12 @@ impl fmt::Debug for ControlCommand {
     }
 }
 
+// bt-hci 0.11 folded `WriteHci`'s methods into `PacketToController`, so these
+// are one impl rather than two.
 #[cfg(feature = "embassy")]
-impl bt_hci::HostToControllerPacket for ControlCommand {
+impl bt_hci::transport::PacketToController for ControlCommand {
     const KIND: bt_hci::PacketKind = bt_hci::PacketKind::Cmd;
-}
 
-#[cfg(feature = "embassy")]
-impl bt_hci::WriteHci for ControlCommand {
     fn size(&self) -> usize {
         3 + self.parameters.len()
     }
@@ -849,7 +848,7 @@ mod tests {
     #[test]
     #[cfg(feature = "embassy")]
     fn embassy_command_adapter_writes_exact_h4_sync_and_async() {
-        use bt_hci::{WriteHci, transport::WithIndicator};
+        use bt_hci::transport::{PacketToController, WithIndicator};
         use core::{
             future::Future,
             pin::pin,

@@ -159,7 +159,7 @@ mod tests {
     use super::*;
     use crate::iso::{Boundary, PacketStatus, SduHeader};
     use alloc::vec::Vec;
-    use bt_hci::{ControllerToHostPacket, HostToControllerPacket, transport::WithIndicator};
+    use bt_hci::transport::{PacketToController, PacketToHost, WithIndicator};
     use core::{
         cell::RefCell,
         future::Future,
@@ -179,14 +179,16 @@ mod tests {
     }
 
     impl Transport for FakeTransport {
-        async fn read<'a>(
+        // bt-hci 0.11 makes `read` generic over the packet type instead of
+        // returning a concrete enum; this mock never completes a read.
+        async fn read<'a, P: PacketToHost<'a>>(
             &self,
             _: &'a mut [u8],
-        ) -> Result<ControllerToHostPacket<'a>, Self::Error> {
+        ) -> Result<P, Self::Error> {
             core::future::pending().await
         }
 
-        async fn write<T: HostToControllerPacket>(&self, packet: &T) -> Result<(), Self::Error> {
+        async fn write<P: PacketToController>(&self, packet: &P) -> Result<(), Self::Error> {
             if self.pending {
                 core::future::pending::<()>().await;
             }
