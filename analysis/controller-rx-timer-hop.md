@@ -67,12 +67,44 @@ Generated image SHA-256 is
 Allocator SHA-256 is
 `dc1c2dfabb13f4a8de26ab8328de4def56944d2d646bbe65cf201295bdbc4d47`.
 
-## Live gate
+## Live result: timer retuning suppresses reception
 
-No scan-enabled hardware run is claimed. Run silent, correctly aligned hopping,
-and one-event-offset controls, with stock firmware restoration checks after each
-run. Confirm scan telemetry grows before acquisition, synchronization changes to
-one only after a delivered marker, and synchronized advances then follow the
-32-tick cadence. Sustained reception after a loss can validate this marker
-diagnostic, but only BIGInfo-derived anchor and interval handling can promote it
-to broadcast synchronization.
+Three live Pico W runs with the scan image delivered no packets at all, and the
+decisive one removes channel alignment as an explanation.
+
+| Run | Transmitter | Delivered | Scan retunes | Marker |
+| --- | --- | --- | --- | --- |
+| Silent | none | 0 | 32036 | 0 |
+| Aligned CSA#2 marker | `marker-counter` hopping | 0 | 32035 | 0 |
+| Fixed channel 0 | `marker-counter`, 2404 MHz, no hopping | 0 | 32036 | 0 |
+
+The fixed-channel transmitter completed `DTM_TX done sent=500 disabled=true`
+while scanning across all CSA#2 candidates. The same transmitter and the same
+host deliver 500 of 500 with the non-timer `--stream` image, so the radio, the
+marker fixture, the mailbox, and the host path are all known good. Scanning
+therefore visits the transmitter's channel many times per packet yet still
+receives nothing.
+
+This is strong evidence that retuning from the countdown callback leaves the
+receiver unarmed: the stock RX rearm path and an asynchronous channel
+reconfiguration from the timer context are not compatible in this image. The
+earlier packet-driven `--hop` image retuned only after a stock receive callback
+had rearmed the radio, and it did receive consecutive events. Static emulation
+cannot see this because it stubs the radio helpers.
+
+Trace accounting was exact in every run: `A = S`, `V = 0`, `T = 32`,
+`Q = 1 + S`, and the reported channel equalled CSA#2 of the reported counter.
+The defect is in radio arming, not in the counter, scan, or trace logic.
+
+Next step is to stop retuning from the timer context. Keep the countdown
+callback as a clock that only advances the event counter, and apply the channel
+change where the packet-driven image already proved it safe, after the stock
+receive callback rearms. Only BIGInfo-derived anchor and interval handling can
+promote that to broadcast synchronization.
+
+Hardware restoration: each run passed two stock capability checks with LMP
+`0x2310`, and the marker and fixed-channel runs restored Nordic RRAM
+`434bbc66505f44ff1e5d50693205238fb17f7791785611df6e3e8148021a2573` and UICR
+`06f4af83fcd2659a91ad36d1bc18aa0504ef4f890668b4ba50e7f2587779ee28`
+byte-identically. Evidence:
+`work/embassy-normal-rx-timer-hop-series-v6/`.
