@@ -491,3 +491,54 @@ Pico stock restorations pass two capability checks, and both Nordic RRAM
 byte for byte. This establishes repeated fixed-channel reception with
 autonomous controller wake, not BIG synchronization, channel hopping,
 encryption, coexistence or LE Audio profiles.
+
+## Open-loop CSA#2 hopping through Embassy
+
+`--hop` (with `--bis --iso --stream`) builds a separate 2048-byte image,
+`18d2465e09e8b158ad73781ede07c2991dd62e2e7823770d83cd446292e6fbf1`, with its
+own 112-byte allocator
+`dc1c2dfabb13f4a8de26ab8328de4def56944d2d646bbe65cf201295bdbc4d47`. The
+validated stream image and its allocator rebuild byte-identical. Allocators
+encode their reservation, so the images must never be paired across sizes.
+
+Event zero is programmed from the BIS phase hook. Every matching RX callback,
+including CRC failures, runs stock first, lets stock rearm the radio, then
+advances a 16-bit event counter once, derives the next CSA#2 channel from
+channel identifier `0xcf58` over all 37 data channels, and writes whitening
+and the RF selector. Retuning after stock is required: stock rearms with the
+old channel. Advancing on CRC failures matters too, otherwise a single
+corrupted packet desynchronises the counter permanently. Static checks cover
+the ordering, the event-zero channel, 16-bit wrap, both CRC paths, guards and
+ring-full interleavings, and 262144 cases agree with the reference.
+
+The nRF54L15 `marker-hop` transmitter walks the same sequence;
+`marker-hop-offset` shifts the event counter by one, which CSA#2 maps from
+channel 1 to channel 28, and is the negative control.
+
+| Control | Transmitter | Delivered SDUs | Longest aligned run |
+| --- | --- | --- | --- |
+| Silent | None | 0 | 0 |
+| Aligned, abort on first gap | `marker-hop` | 11 | 11 |
+| Aligned, full window | `marker-hop` | 15 | 3 |
+| Offset by one event | `marker-hop-offset` | 16 | 1 |
+
+The abort-on-gap run received events 0..10 consecutively across nine distinct
+CSA#2 channels (1, 5, 7, 8, 16, 25, 28, 29, 30), which a fixed-channel
+receiver cannot produce. Retuning therefore works.
+
+Staying synchronised does not. The counter advances only inside the receive
+callback, so a missed event parks the receiver on a channel the transmitter
+has already left, and reception resumes only where the two sequences coincide
+again. Over a full window the aligned and offset transmitters delivered 15 and
+16 SDUs, so delivered totals cannot distinguish them; only the longest run of
+consecutive transmitter event indices can, at 3 against 1. Host checks are
+expressed that way: `--min-run` for the aligned case, and no run at all
+permitted for the offset control.
+
+This is open loop. There is no BIGInfo anchor, no timer-driven counter and no
+payload-index resync, so none of this is BIG synchronization. All three
+archived Pico runs restored stock and passed two capability checks, and the
+Nordic RRAM (1,560,576 bytes) and UICR (4096 bytes) readbacks match the
+original backups byte for byte. Evidence:
+`work/embassy-normal-rx-hop-series/` (abort-on-gap) and
+`work/embassy-normal-rx-hop-series-v2/` (full window plus both controls).
