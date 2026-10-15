@@ -16,6 +16,8 @@ marker-bis = []
 marker-iso = ["marker-bis"]
 marker-bad-crc = ["marker-iso"]
 marker-counter = ["marker-iso"]
+marker-hop = ["marker-counter"]
+marker-hop-offset = ["marker-hop"]
 
 [dependencies]
 cyw43-controller-proto = { path = "../../../cyw43-controller/cyw43-controller-proto", default-features = false }

@@ -2,12 +2,40 @@
 #![no_main]
 
 use core::sync::atomic::{Ordering, compiler_fence};
+#[cfg(feature = "marker-hop")]
+use cyw43_controller_proto::channel::IsoChannels;
 use embassy_nrf::{config, pac};
 use pac::radio::vals::{Endian, Len, Mode, Plen, Skipaddr};
 use {defmt_rtt as _, panic_probe as _};
 
 #[repr(align(4))]
 struct Packet([u8; 36]);
+
+/// First subevent channel of one BIS event, full 37-channel map.
+#[cfg(feature = "marker-hop")]
+fn hop_channel(counter: u16) -> u8 {
+    IsoChannels::new(0x718e_bed6, counter, [255, 255, 255, 255, 31])
+        .expect("fixed full channel map")
+        .next()
+        .expect("first ISO subevent")
+}
+
+// Receivers derive the channel from the event counter, so an offset
+// transmitter must land on a different channel to be a real negative control.
+#[cfg(feature = "marker-hop")]
+const COUNTER_OFFSET: u16 = if cfg!(feature = "marker-hop-offset") { 1 } else { 0 };
+
+#[cfg(feature = "marker-hop")]
+fn tune(radio: pac::radio::Radio, channel: u8) {
+    radio.frequency().write(|w| {
+        w.set_frequency(2 * channel + if channel <= 10 { 4 } else { 6 });
+        w.set_map(false);
+    });
+    radio.datawhite().write(|w| {
+        w.set_poly(0x89);
+        w.set_iv(0x40 | u16::from(channel));
+    });
+}
 
 fn halt() -> ! {
     loop {
@@ -104,12 +132,25 @@ fn main() -> ! {
     if cfg!(feature = "marker-counter") {
         defmt::println!("DTM_TX counter first=0 count=500 payload-offset=0 width=2 endian=little");
     }
+    #[cfg(feature = "marker-hop")]
+    {
+        tune(radio, hop_channel(COUNTER_OFFSET));
+        defmt::println!(
+            "DTM_TX hop channel-id=cf58 map=full counter-offset={} first-channel={} first-mhz={}",
+            COUNTER_OFFSET,
+            hop_channel(COUNTER_OFFSET),
+            2402 + 2 * u16::from(hop_channel(COUNTER_OFFSET))
+        );
+    }
 
     // ponytail: bounded marker source only; add precise scheduling for cadence tests.
     for sent in 1u16..=500 {
         if cfg!(feature = "marker-counter") {
             packet.0[2..4].copy_from_slice(&(sent - 1).to_le_bytes());
         }
+        // Retune before arming: the radio latches frequency at TXEN.
+        #[cfg(feature = "marker-hop")]
+        tune(radio, hop_channel((sent - 1).wrapping_add(COUNTER_OFFSET)));
         compiler_fence(Ordering::SeqCst);
         cortex_m::asm::dmb();
         let start = cortex_m::peripheral::DWT::cycle_count();

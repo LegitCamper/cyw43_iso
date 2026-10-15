@@ -4,8 +4,19 @@ import argparse
 from pathlib import Path
 import re
 
+CHANNEL_ID = 0xcf58
 
-def check(text, offset, bis=False, length=31, bad_crc=False, counter=False):
+def csa2_first(counter):
+    """First subevent channel for a full 37-channel map (Core Vol 6 Part B 4.5.8.3)."""
+    value = counter ^ CHANNEL_ID
+    for _ in range(3):
+        value = (int(f"{value & 255:08b}"[::-1], 2)
+                 | (int(f"{value >> 8:08b}"[::-1], 2) << 8))
+        value = (17 * value + CHANNEL_ID) & 0xffff
+    return (value ^ CHANNEL_ID) % 37
+
+
+def check(text, offset, bis=False, length=31, bad_crc=False, counter=False, hop=None):
     assert "failed" not in text and "panicked" not in text
     config = ("mhz=2404 mode=BLE1M aa=718ebed6 crc_init=123401 whitening=true"
               if bis else "mhz=2402 mode=BLE1M aa=71764129 crc_init=555555 whitening=false")
@@ -25,6 +36,14 @@ def check(text, offset, bis=False, length=31, bad_crc=False, counter=False):
     if counter:
         assert text.count(counter_config) == 1
         assert text.index("DTM_TX ready") < text.index(counter_config) < text.index("DTM_TX done")
+    assert text.count("DTM_TX hop ") == int(hop is not None), "unexpected hop configuration"
+    if hop is not None:
+        assert counter, "hopping markers carry packet indices"
+        first = csa2_first(hop)
+        hop_config = (f"DTM_TX hop channel-id=cf58 map=full counter-offset={hop} "
+                      f"first-channel={first} first-mhz={2402 + 2 * first}")
+        assert text.count(hop_config) == 1, "wrong hop configuration"
+        assert text.index("DTM_TX ready") < text.index(hop_config) < text.index("DTM_TX done")
     assert text.count("DTM_TX done sent=500 disabled=true") == 1
     assert text.index("DTM_TX ready") < text.index("DTM_TX done")
 
@@ -54,6 +73,31 @@ def self_check():
             except AssertionError:
                 continue
             raise AssertionError("accepted invalid counter configuration")
+        for hop_offset in (0, 1):
+            first = csa2_first(hop_offset)
+            hop_text = counter_text.replace(
+                "DTM_TX done",
+                f"DTM_TX hop channel-id=cf58 map=full counter-offset={hop_offset} "
+                f"first-channel={first} first-mhz={2402 + 2 * first}\nDTM_TX done")
+            check(hop_text, offset, bis=True, length=26, counter=True, hop=hop_offset)
+            # A hop capture must not pass as fixed-channel and vice versa.
+            wrong = [counter_text,
+                     hop_text.replace(f"first-channel={first}", f"first-channel={(first + 1) % 37}"),
+                     hop_text.replace(f"counter-offset={hop_offset}", f"counter-offset={hop_offset + 1}"),
+                     hop_text.replace("map=full", "map=partial")]
+            for bad in wrong:
+                try:
+                    check(bad, offset, bis=True, length=26, counter=True, hop=hop_offset)
+                except AssertionError:
+                    continue
+                raise AssertionError("accepted invalid hop capture")
+            try:
+                check(hop_text, offset, bis=True, length=26, counter=True)
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError("hop capture accepted as fixed channel")
+        assert csa2_first(0) != csa2_first(1), "offset control must change channel"
         for wrong_config, bis in ((text, True), (bis_text, False)):
             try:
                 check(wrong_config, offset, bis=bis)
@@ -76,9 +120,13 @@ if __name__ == "__main__":
     parser.add_argument("--iso", action="store_true", help="26-byte BIS-identity marker")
     parser.add_argument("--bad-crc", action="store_true", help="26-byte marker with one CRC-init bit toggled")
     parser.add_argument("--counter", action="store_true", help="26-byte markers with LE u16 packet indices")
+    parser.add_argument("--hop", type=int, choices=(0, 1), default=None,
+                        help="CSA#2 hopping markers with this event-counter offset")
     args = parser.parse_args()
     self_check()
     if args.capture:
-        iso = args.iso or args.bad_crc or args.counter
-        check(args.capture.read_text(), 128 if args.alternate else 0, args.bis or iso, 26 if iso else 31, args.bad_crc, args.counter)
+        counter = args.counter or args.hop is not None
+        iso = args.iso or args.bad_crc or counter
+        check(args.capture.read_text(), 128 if args.alternate else 0, args.bis or iso,
+              26 if iso else 31, args.bad_crc, counter, args.hop)
     print("Bounded marker transmitter capture check passes")
