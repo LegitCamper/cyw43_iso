@@ -1,0 +1,36 @@
+[package]
+name = "cyw43-iso-re"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["std"]
+std = []
+lc3 = ["dep:lc3-codec"]
+embassy = ["dep:bt-hci", "dep:embedded-io", "dep:embedded-io-async"]
+
+[[bin]]
+name = "cyw43-iso-re"
+path = "src/main.rs"
+required-features = ["std"]
+
+[[example]]
+name = "radio_audio"
+required-features = ["std", "lc3"]
+
+[[example]]
+name = "broadcast_fixture"
+required-features = ["std"]
+
+[dependencies]
+lc3-codec = { package = "cyw43-lc3-codec", version = "0.2", path = "vendor/lc3-codec", optional = true, default-features = false }
+bt-hci = { version = "0.8", optional = true, default-features = false }
+embedded-io = { version = "0.7", optional = true, default-features = false }
+embedded-io-async = { version = "0.7", optional = true, default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "warn"
