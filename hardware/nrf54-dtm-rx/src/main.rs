@@ -10,14 +10,9 @@ use pac::radio::vals::{Crcstatus, Endian, Len, Mode, Plen, Skipaddr};
 use {defmt_rtt as _, panic_probe as _};
 
 #[cfg(feature = "discovery")]
-#[path = "../../../src/bis.rs"]
-#[allow(dead_code)]
-mod bis;
-#[cfg(feature = "discovery")]
 mod discovery;
-#[cfg(any(feature = "hopping", feature = "discovery"))]
-#[path = "../../../src/iso_channel.rs"]
-mod iso_channel;
+#[cfg(all(feature = "hopping", not(feature = "discovery")))]
+use cyw43_controller_proto::channel as iso_channel;
 
 const BIS: bool = cfg!(feature = "bis");
 const ACCESS_ADDRESS: u32 = if cfg!(feature = "discovery") {

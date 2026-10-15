@@ -1,9 +1,7 @@
-use cyw43_iso_re::{
-    bap::{
-        AseClient, AseCommand, AseDirection, AseState, AseStatus, ControlResponse, LC3_CODEC_ID,
-        Lc3Capabilities, ProfileError, parse_pacs,
-    },
-    le_audio::{Lc3Config, UnicastQos},
+use cyw43_controller_proto::ltv::{Lc3Config, UnicastQos};
+use cyw43_iso_re::bap::{
+    AseClient, AseCommand, AseDirection, AseState, AseStatus, ControlResponse, LC3_CODEC_ID,
+    Lc3Capabilities, ProfileError, parse_pacs,
 };
 
 const MONO: &[u8] = &[2, 1, 3, 2, 2, 1, 3, 4, 40, 0];

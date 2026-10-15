@@ -5,7 +5,7 @@
 //! ascending Audio Location bits. Caller-owned working buffers retain codec
 //! history across SDUs. This backend is not Bluetooth qualified.
 
-use crate::le_audio::{AudioError, FrameDuration, Lc3Config, SamplingFrequency};
+use cyw43_controller_proto::ltv::{AudioError, FrameDuration, Lc3Config, SamplingFrequency};
 use core::fmt;
 pub use lc3_codec::common::complex::Complex;
 use lc3_codec::{

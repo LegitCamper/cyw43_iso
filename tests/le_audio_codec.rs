@@ -1,9 +1,7 @@
 #![cfg(feature = "lc3")]
 
-use cyw43_iso_re::{
-    lc3::{CodecError, Complex, Decoder, Encoder, Layout},
-    le_audio::{FrameDuration, Lc3Config, SamplingFrequency},
-};
+use cyw43_controller_proto::ltv::{FrameDuration, Lc3Config, SamplingFrequency};
+use cyw43_iso_re::lc3::{CodecError, Complex, Decoder, Encoder, Layout};
 
 fn mono() -> Lc3Config {
     Lc3Config::parse(&[2, 1, 3, 2, 2, 1, 3, 4, 40, 0]).unwrap()

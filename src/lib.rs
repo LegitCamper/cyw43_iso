@@ -4,22 +4,17 @@
 
 extern crate alloc;
 
+pub use cyw43_controller_proto as proto;
+
 pub mod bap;
-pub mod bis;
-pub mod broadcast;
-pub mod broadcast_advertising;
 #[cfg(feature = "embassy")]
 pub mod embassy;
 pub mod iso;
-pub mod iso_channel;
 pub mod iso_control;
 pub mod iso_credit;
 pub mod iso_sdu;
-pub mod isoal;
-pub mod isoal_framed;
 #[cfg(feature = "lc3")]
 pub mod lc3;
-pub mod le_audio;
 
 use alloc::{vec, vec::Vec};
 use core::error::Error;

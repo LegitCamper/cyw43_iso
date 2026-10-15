@@ -6,12 +6,11 @@
 //! Successful command encoding is not an ASE state transition: observe server
 //! control-point responses and ASE notifications before advancing a stream.
 
-use crate::le_audio::{AudioError, Lc3Config, UnicastQos};
+use cyw43_controller_proto::ltv::{AudioError, Lc3Config, UnicastQos};
 use alloc::{vec, vec::Vec};
 use core::fmt;
 
-/// Bluetooth LC3 `Codec_ID`: coding format, company ID, vendor codec ID.
-pub const LC3_CODEC_ID: [u8; 5] = [0x06, 0, 0, 0, 0];
+pub use cyw43_controller_proto::ltv::LC3_CODEC_ID;
 /// Published Audio Capabilities Service UUID.
 pub const PACS_UUID: u16 = 0x1850;
 /// Audio Stream Control Service UUID.

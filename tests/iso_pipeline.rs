@@ -1,9 +1,11 @@
+use cyw43_controller_proto::{
+    isoal::{Unframed, UnframedSdu},
+    ltv::{Lc3Config, UnicastQos},
+};
 use cyw43_iso_re::{
     iso::{Direction, PacketStatus, SduHeader},
     iso_credit::{CreditError, IsoCredits},
     iso_sdu::{SduFragments, SduReassembler},
-    isoal::{Unframed, UnframedSdu},
-    le_audio::{Lc3Config, UnicastQos},
 };
 
 #[test]
@@ -94,10 +96,10 @@ fn lc3_sized_sdu_crosses_credit_limited_hci_and_unframed_isoal() {
     reason = "one end-to-end audio/loss scenario keeps all boundary checks visible"
 )]
 fn encoded_audio_crosses_framed_isoal_hci_and_recovers_after_radio_loss() {
-    use cyw43_iso_re::{
-        isoal_framed::{FRAMED_LLID, Framed, FramedPdu, FramedReceiver, FramedReport, TimedSdu},
-        lc3::{Complex, Decoder, Encoder},
+    use cyw43_controller_proto::isoal_framed::{
+        FRAMED_LLID, Framed, FramedPdu, FramedReceiver, FramedReport, TimedSdu,
     };
+    use cyw43_iso_re::lc3::{Complex, Decoder, Encoder};
 
     let config = Lc3Config::parse(&[2, 1, 3, 2, 2, 1, 3, 4, 40, 0]).unwrap();
     let (integers, scalars, complex) = Encoder::<1>::working_lengths(config).unwrap();

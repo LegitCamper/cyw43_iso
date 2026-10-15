@@ -1,5 +1,8 @@
 //! Bounded diagnostic receiver for one cleartext, unframed, NSE=BN=IRC=1 BIS.
-use crate::{bis::BisParameters, iso_channel::IsoChannels};
+use cyw43_controller_proto::{
+    bis::{BisParameters, validate_access_address},
+    channel::IsoChannels,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -120,7 +123,7 @@ impl Discovery {
                     crc: le(&sync[13..16]),
                     channel: 0,
                 };
-                crate::bis::validate_access_address(self.periodic.address, false)
+                validate_access_address(self.periodic.address, false)
                     .map_err(|_| "periodic AA")?;
                 self.periodic.channel =
                     channel(self.periodic.address, self.periodic_counter, self.map)?;

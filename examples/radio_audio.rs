@@ -3,10 +3,8 @@
 //! Native HCI fixture: ... -- generate-native twenty-frames.lc3
 //! Decode ordered, deduplicated SDUs: ... -- decode frames.lc3 decoded.s16le
 
-use cyw43_iso_re::{
-    lc3::{Complex, Decoder, Encoder},
-    le_audio::Lc3Config,
-};
+use cyw43_controller_proto::ltv::Lc3Config;
+use cyw43_iso_re::lc3::{Complex, Decoder, Encoder};
 use std::{error::Error, fs};
 
 const FRAME_BYTES: usize = 26;

@@ -23,6 +23,7 @@ name = "broadcast_fixture"
 required-features = ["std"]
 
 [dependencies]
+cyw43-controller-proto = { path = "../cyw43-controller/cyw43-controller-proto" }
 lc3-codec = { package = "cyw43-lc3-codec", version = "0.2", path = "vendor/lc3-codec", optional = true, default-features = false }
 bt-hci = { version = "0.8", optional = true, default-features = false }
 embedded-io = { version = "0.7", optional = true, default-features = false }

@@ -68,10 +68,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "cyw43-controller-proto"
+version = "0.1.0"
+
+[[package]]
 name = "cyw43-iso-re"
 version = "0.1.0"
 dependencies = [
  "bt-hci",
+ "cyw43-controller-proto",
  "cyw43-lc3-codec",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",

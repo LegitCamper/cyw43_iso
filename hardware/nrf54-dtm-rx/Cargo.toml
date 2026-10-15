@@ -18,6 +18,7 @@ marker-bad-crc = ["marker-iso"]
 marker-counter = ["marker-iso"]
 
 [dependencies]
+cyw43-controller-proto = { path = "../../../cyw43-controller/cyw43-controller-proto", default-features = false }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 defmt = "1"

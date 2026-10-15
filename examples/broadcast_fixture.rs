@@ -2,10 +2,10 @@
 //! Run: `cargo run --example broadcast_fixture -- work`
 //! Use `--continuous` after the output directory for 20-ms periodic advertising.
 
-use cyw43_iso_re::{
+use cyw43_controller_proto::{
     broadcast::{BigInfo, BroadcastPhy, SingleBisBase},
     broadcast_advertising::{AdvertisingOffset, AdvertisingSet, SyncInfo},
-    le_audio::Lc3Config,
+    ltv::Lc3Config,
 };
 use std::{error::Error, fs, path::PathBuf};
 
