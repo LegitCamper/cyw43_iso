@@ -355,7 +355,7 @@ def build(bis=False, iso=False, stream=False, hop=False, timer_hop=False):
                     assert values[name] == base + offset, name
             if timer_hop:
                 for name, offset in (("hop_advance", 1024), ("hop_timer_initial", 1050), ("hop_trace", 1100),
-                                     ("timer_countdown", 1132), ("timer_rearm", 1250),
+                                     ("timer_countdown", 1132), ("timer_rearm", 1234),
                                      ("configure_channel", 1280), ("bis_channel", 1408),
                                      ("marker_acquire", 1536)):
                     assert values[name] == base + offset, name
@@ -376,8 +376,8 @@ def build(bis=False, iso=False, stream=False, hop=False, timer_hop=False):
                 assert blob[1400:] == bytes(648)
             if timer_hop:
                 assert blob[1132:1134] != bytes(2)
-                assert struct.unpack_from("<I", blob, 1272)[0] == 0x714A5, "stock RX rearm literal"
-                assert blob[1276:1280] == bytes(4)
+                assert struct.unpack_from("<I", blob, 1256)[0] == 0x714A5, "stock RX rearm literal"
+                assert blob[1260:1280] == bytes(20)
                 assert blob[1348:1408] == bytes(60)
                 assert blob[1528:1536] == bytes(8)
         else:
@@ -816,18 +816,18 @@ def emulate_timer_hop(blob):
     assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (0, channel, 9, 32, 69, 2, 1, 5)
     assert stock_calls == [0x209000] + [event] * 70
     assert delay_calls == [2] * 7, "one stock RX rearm settle delay per timer retune"
-    before = struct.unpack("<8I", cpu.mem_read(trace, 32))
-    for index in range(32):
-        assert tick(current=False) == [], "no radio writes while the event is not current"
-        after = struct.unpack("<8I", cpu.mem_read(trace, 32))
-        assert after[4] == before[4] + index + 1, "callback still counted"
-        assert after[1:3] == before[1:3], "channel untouched without rearm"
-        assert after[5:] == before[5:], "sync and scan telemetry preserved"
-        boundary = index == 31
-        assert after[0] == (before[0] + boundary) & 0xFFFF, "counter advances only at a boundary"
-        assert after[3] == (32 if boundary else 31 - index)
+    for synchronized in (True, False):
+        cpu.mem_write(trace, struct.pack("<8I", 7, csa2_channel(7), 4, 11, 90,
+                                        2, int(synchronized), 5))
+        before = struct.unpack("<8I", cpu.mem_read(trace, 32))
+        for index in range(1, 65):
+            assert tick(current=False) == [], "no radio write while the event is not current"
+            after = struct.unpack("<8I", cpu.mem_read(trace, 32))
+            assert after[4] == before[4] + index, "the callback is still counted"
+            assert after[:4] == before[:4], "counter, channel and countdown are untouched"
+            assert after[5:] == before[5:], "advance, sync and scan telemetry preserved"
     assert delay_calls == [2] * 7, "a non-current tick performs no rearm"
-    print("Timer-hop assembly passes: per-tick unsynchronized CSA#2 scanning with stock RX rearm after every timer retune, marker-only first-packet acquisition, phase reset, 32-tick synchronized advance, guards, counter-only ticks while the event is not current, one-shot sync and synced 16-bit wrap.")
+    print("Timer-hop assembly passes: per-tick unsynchronized CSA#2 scanning with stock RX rearm after every timer retune, marker-only first-packet acquisition, phase reset, 32-tick synchronized advance, guards, ticks counted without any radio or phase change while the event is not current, one-shot sync and synced 16-bit wrap.")
 
 
 def export_blob(directory, blob, stream=False, hop=False, timer_hop=False):

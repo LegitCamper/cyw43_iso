@@ -34,11 +34,11 @@ countdown and advance exactly one CSA#2 event at zero, preserving the marker
 synchronization word and scan count across 16-bit event-counter wrap. Receive
 callbacks never perform a post-acquisition event advance.
 
-Both retune paths first require event byte `+0x0f` to equal 1, the same
+Every accepted callback first requires event byte `+0x0f` to equal 1, the same
 currency condition stock RX processing uses before arming. A tick that fails it
-is still counted and still advances the countdown, and at a countdown boundary
-it advances the event counter, but it performs no channel write and no rearm.
-The receiver is therefore never reprogrammed while the event is not current.
+increments the accepted-callback count and does nothing else: no counter
+advance, no countdown change, no channel write, and no rearm. The receiver is
+therefore never reprogrammed while the event is not current.
 
 This is marker-fixture acquisition, not BIGInfo-derived anchor synchronization.
 It assumes the received marker index identifies the current transmitter event
@@ -52,6 +52,8 @@ channel, channel configuration count, ticks remaining, accepted countdown
 callbacks, synchronized event advances, marker synchronized (`0` or `1`), and
 pre-acquisition scan retunes. Configuration count includes initial setup, every
 scan retune, marker acquisition retune, and every synchronized event retune.
+Because non-current ticks are counted but perform no work, accepted callbacks
+are an upper bound on scan plus synchronized ticks rather than an exact sum.
 
 ## Checks
 
@@ -62,8 +64,8 @@ uv run --quiet --with unicorn python analysis/check-controller-rx.py \
 ```
 
 Unicorn checks stock countdown chaining, callback guards, one CSA#2 scan retune
-plus one stock RX rearm per accepted unsynchronized tick, counter-only ticks
-with no radio write while the event is not current, rejection of a non-marker payload, one-shot
+plus one stock RX rearm per accepted unsynchronized tick, counted-only ticks
+that change nothing else while the event is not current, rejection of a non-marker payload, one-shot
 acquisition from a valid marker, acquisition configuration accounting, 32-tick
 phase reset, interrupt-mask restoration, no RX-driven advance, exactly one
 post-acquisition advance per 32 accepted ticks, and synchronized 16-bit counter
@@ -72,7 +74,7 @@ event-zero CSA#2 configuration and installation of the resident countdown
 callback.
 
 Generated image SHA-256 is
-`7272b1bfa277c7c1ccd20a3381a1069a131b4e6a4f573434da4cd605b4630419`.
+`651b509797ae3907976e295233b5ecc5473268df36990b29d084a0fc5951461b`.
 Allocator SHA-256 is
 `dc1c2dfabb13f4a8de26ab8328de4def56944d2d646bbe65cf201295bdbc4d47`.
 

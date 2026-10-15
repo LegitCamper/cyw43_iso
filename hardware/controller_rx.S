@@ -359,23 +359,17 @@ timer_countdown:
     ldr r5,[r4,#16]
     adds r5,#1
     str r5,[r4,#16]
-    ldr r5,[r4,#24]
-    cbnz r5,timer_synchronized
     ldrb r5,[r7,#15]
     cmp r5,#1
-    bne timer_count_only
+    bne timer_done
+    ldr r5,[r4,#24]
+    cbnz r5,timer_synchronized
     bl hop_advance
     mov r0,r7
     bl timer_rearm
     ldr r5,[r4,#28]
     adds r5,#1
     str r5,[r4,#28]
-    b timer_done
-timer_count_only:
-    ldr r5,[r4]
-    adds r5,#1
-    uxth r5,r5
-    str r5,[r4]
     b timer_done
 timer_synchronized:
     ldr r5,[r4,#12]
@@ -384,9 +378,6 @@ timer_synchronized:
     bne timer_done
     movs r5,#32
     str r5,[r4,#12]
-    ldrb r5,[r7,#15]
-    cmp r5,#1
-    bne timer_count_only
     bl hop_advance
     mov r0,r7
     bl timer_rearm
