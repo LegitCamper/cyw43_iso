@@ -1,0 +1,32 @@
+[package]
+name = "nrf54-dtm-rx"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+bis = []
+timestamps = []
+hopping = ["bis", "timestamps"]
+discovery = ["bis", "timestamps"]
+marker-alt = []
+marker-bis = []
+marker-iso = ["marker-bis"]
+marker-bad-crc = ["marker-iso"]
+marker-counter = ["marker-iso"]
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = { version = "1", features = ["disable-blocking-mode"] }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382", default-features = false, features = ["nrf54l15-app-s", "rt", "unstable-pac"] }
+panic-probe = { version = "1", features = ["print-defmt"] }
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = true
+opt-level = "s"

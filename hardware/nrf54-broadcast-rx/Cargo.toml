@@ -1,0 +1,40 @@
+[package]
+name = "nrf54-broadcast-rx"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+preconfigured = []
+
+[dependencies]
+bt-hci = { version = "0.11", default-features = false, features = ["defmt"] }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = { version = "1", features = ["disable-blocking-mode"] }
+embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-nrf = { version = "0.11", default-features = false, features = ["defmt", "time-driver-grtc", "rt", "nrf54l15-app-s"] }
+embassy-time = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
+nrf-mpsl = { git = "https://github.com/LegitCamper/nrf-sdc", rev = "d6f66312ecf34c086babb2a56e3319d8da902fc9", default-features = false, features = ["defmt", "critical-section-impl"] }
+nrf-sdc = { git = "https://github.com/LegitCamper/nrf-sdc", rev = "d6f66312ecf34c086babb2a56e3319d8da902fc9", default-features = false, features = ["defmt", "central", "peripheral", "nrf54l15-app-s"] }
+panic-probe = { version = "1", features = ["print-defmt"] }
+static_cell = "2"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = true
+opt-level = "s"
+
+[patch.crates-io]
+bt-hci = { git = "https://github.com/LegitCamper/bt-hci", rev = "a3b9b9785ef6e8269db31e1431f7d0710a6265cc" }
+bt-hci-transport = { git = "https://github.com/LegitCamper/bt-hci", rev = "a3b9b9785ef6e8269db31e1431f7d0710a6265cc" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
+embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", rev = "03c826f2544220cb44b2dec05f5d636a80d39382" }
