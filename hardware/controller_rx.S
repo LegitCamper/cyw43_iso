@@ -328,6 +328,7 @@ hop_timer_initial:
     str r0,[r4,#16]
     str r0,[r4,#20]
     str r0,[r4,#24]
+    str r0,[r4,#28]
     adr r0,timer_countdown
     orr r0,r0,#1
     adr r1,callbacks
@@ -335,7 +336,7 @@ hop_timer_initial:
     pop {r4,pc}
     .balign 4
 hop_trace:
-    .space 28
+    .space 32
     .space 1132-(.-hook),0
 .thumb_func
 timer_countdown:
@@ -357,6 +358,14 @@ timer_countdown:
     ldr r5,[r4,#16]
     adds r5,#1
     str r5,[r4,#16]
+    ldr r5,[r4,#24]
+    cbnz r5,timer_synchronized
+    bl hop_advance
+    ldr r5,[r4,#28]
+    adds r5,#1
+    str r5,[r4,#28]
+    b timer_done
+timer_synchronized:
     ldr r5,[r4,#12]
     subs r5,#1
     str r5,[r4,#12]

@@ -354,7 +354,7 @@ def build(bis=False, iso=False, stream=False, hop=False, timer_hop=False):
                                      ("configure_channel", 1152), ("bis_channel", 1280)):
                     assert values[name] == base + offset, name
             if timer_hop:
-                for name, offset in (("hop_advance", 1024), ("hop_timer_initial", 1050), ("hop_trace", 1096),
+                for name, offset in (("hop_advance", 1024), ("hop_timer_initial", 1050), ("hop_trace", 1100),
                                      ("timer_countdown", 1132), ("configure_channel", 1280), ("bis_channel", 1408),
                                      ("marker_acquire", 1536)):
                     assert values[name] == base + offset, name
@@ -433,7 +433,7 @@ def emulate(blob, stream=False, hop=False, timer_hop=False):
         if hop:
             cpu.mem_write(hop_trace, struct.pack("<3I", event_counter, current_channel, 1))
         elif timer_hop:
-            cpu.mem_write(base + 1096, struct.pack("<7I", event_counter, current_channel, 1, 32, 0, 0, 0))
+            cpu.mem_write(base + 1100, struct.pack("<8I", event_counter, current_channel, 1, 32, 0, 0, 0, 0))
         incoming = [0x11000000 + i * 0x101 for i in range(13)]
         incoming[0] = event if bad != "event" else 0x209000
         for register, value in zip(registers, incoming):
@@ -517,9 +517,9 @@ def emulate(blob, stream=False, hop=False, timer_hop=False):
             expected_hop = struct.pack("<3I", next_counter, csa2_channel(next_counter), 1 + advanced)
             assert actual_hop == expected_hop, (actual_hop.hex(), expected_hop.hex(), status, bad)
         elif timer_hop:
-            actual_hop = bytes(cpu.mem_read(base + 1096, 28))
-            expected_hop = (struct.pack("<7I", marker_index, csa2_channel(marker_index), 2, 32, 0, 0, 1)
-                            if acquired else struct.pack("<7I", event_counter, current_channel, 1, 32, 0, 0, 0))
+            actual_hop = bytes(cpu.mem_read(base + 1100, 32))
+            expected_hop = (struct.pack("<8I", marker_index, csa2_channel(marker_index), 2, 32, 0, 0, 1, 0)
+                            if acquired else struct.pack("<8I", event_counter, current_channel, 1, 32, 0, 0, 0, 0))
             assert actual_hop == expected_hop, (actual_hop.hex(), expected_hop.hex(), status, bad)
         result = [cpu.reg_read(register) for register in registers]
         result.append(cpu.reg_read(arm.UC_ARM_REG_APSR) & 0xF8000000)
@@ -673,7 +673,7 @@ def emulate_phase(blob, hop=False, timer_hop=False):
                              (0x318B6C, 4, 0x01302340), (0x318BF4, 4, 0)]
             if hop or timer_hop:
                 expected_mmio += [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
-                trace_offset = 1096 if timer_hop else 1072
+                trace_offset = 1100 if timer_hop else 1072
                 assert bytes(cpu.mem_read(base + trace_offset, 12)) == struct.pack("<3I", 0, channel, 1)
             assert mmio[-len(expected_mmio):] == expected_mmio
             assert struct.unpack("<I", cpu.mem_read(base + 768, 4))[0] == (count + 1) & 0xFFFFFFFF
@@ -702,7 +702,7 @@ def emulate_timer_hop(blob):
     rom = (Path(__file__).resolve().parents[1] / "work/cyw43439-btrom-clean.bin").read_bytes()
     registers = [getattr(arm, f"UC_ARM_REG_R{i}") for i in range(13)]
     base, event, params, stop, stack = 0x217E78, 0x209788, 0x2097B8, 0xF0000, 0x21D000
-    trace, callback, acquire_callback = base + 1096, base + 1132, base + 1536
+    trace, callback, acquire_callback = base + 1100, base + 1132, base + 1536
     cpu = un.Uc(un.UC_ARCH_ARM, un.UC_MODE_THUMB | un.UC_MODE_MCLASS)
     cpu.mem_map(0, 0x100000)
     cpu.mem_write(0, rom)
@@ -712,7 +712,7 @@ def emulate_timer_hop(blob):
     cpu.mem_write(event + 28, struct.pack("<I", params))
     cpu.mem_write(params + 6, b"\x01")
     first_channel = csa2_channel(0)
-    cpu.mem_write(trace, struct.pack("<7I", 0, first_channel, 1, 32, 0, 0, 0))
+    cpu.mem_write(trace, struct.pack("<8I", 0, first_channel, 1, 32, 0, 0, 0, 0))
     cpu.mem_write(0x318BF4, struct.pack("<I", first_channel))
     cpu.mem_write(0x3186A4, struct.pack("<I", rf_selector(first_channel)))
     stock_calls, writes = [], []
@@ -768,26 +768,23 @@ def emulate_timer_hop(blob):
             assert cpu.reg_read(registers[register]) == incoming[register], register
         return writes[before_writes:]
 
-    initial = bytes(cpu.mem_read(trace, 28))
-    assert tick(argument=0x209000) == [] and bytes(cpu.mem_read(trace, 28)) == initial
-    assert tick(mode=0) == [] and bytes(cpu.mem_read(trace, 28)) == initial
-    for _ in range(31):
-        assert tick() == []
-    assert struct.unpack("<7I", cpu.mem_read(trace, 28)) == (0, first_channel, 1, 1, 31, 0, 0)
-    channel = csa2_channel(1)
-    assert tick() == [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
-    assert struct.unpack("<7I", cpu.mem_read(trace, 28)) == (1, channel, 2, 32, 32, 1, 0)
-    for _ in range(5):
-        assert tick() == []
-    before_acquire = bytes(cpu.mem_read(trace, 28))
+    initial = bytes(cpu.mem_read(trace, 32))
+    assert tick(argument=0x209000) == [] and bytes(cpu.mem_read(trace, 32)) == initial
+    assert tick(mode=0) == [] and bytes(cpu.mem_read(trace, 32)) == initial
+    for candidate in range(1, 6):
+        channel = csa2_channel(candidate)
+        assert tick() == [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+        assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (
+            candidate, channel, candidate + 1, 32, candidate, 0, 0, candidate)
+    before_acquire = bytes(cpu.mem_read(trace, 32))
     assert acquire(0xFFFE, valid=False) == []
-    assert bytes(cpu.mem_read(trace, 28)) == before_acquire
+    assert bytes(cpu.mem_read(trace, 32)) == before_acquire
     channel = csa2_channel(0xFFFE)
     assert acquire(0xFFFE, primask=1) == [
         (0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
-    assert struct.unpack("<7I", cpu.mem_read(trace, 28)) == (0xFFFE, channel, 3, 32, 37, 1, 1)
-    acquired = bytes(cpu.mem_read(trace, 28))
-    assert acquire(42) == [] and bytes(cpu.mem_read(trace, 28)) == acquired
+    assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (0xFFFE, channel, 7, 32, 5, 0, 1, 5)
+    acquired = bytes(cpu.mem_read(trace, 32))
+    assert acquire(42) == [] and bytes(cpu.mem_read(trace, 32)) == acquired
     for index in range(64):
         updates = tick()
         if index in (31, 63):
@@ -798,9 +795,9 @@ def emulate_timer_hop(blob):
         else:
             assert updates == []
     channel = csa2_channel(0)
-    assert struct.unpack("<7I", cpu.mem_read(trace, 28)) == (0, channel, 5, 32, 101, 3, 1)
-    assert stock_calls == [0x209000] + [event] * 102
-    print("Timer-hop assembly passes: stock countdown chaining, marker-only first-packet acquisition, phase reset, 32-tick RX-independent advance, guards, one-shot sync and synced 16-bit wrap.")
+    assert struct.unpack("<8I", cpu.mem_read(trace, 32)) == (0, channel, 9, 32, 69, 2, 1, 5)
+    assert stock_calls == [0x209000] + [event] * 70
+    print("Timer-hop assembly passes: per-tick unsynchronized CSA#2 scanning, marker-only first-packet acquisition, phase reset, 32-tick synchronized advance, guards, one-shot sync and synced 16-bit wrap.")
 
 
 def export_blob(directory, blob, stream=False, hop=False, timer_hop=False):
@@ -873,27 +870,29 @@ def export_blob(directory, blob, stream=False, hop=False, timer_hop=False):
                                    "no_standard_BIG_creation_CIS_or_encryption",
                                    "exclusive_stock_DTM_event_no_radio_coexistence", "reset_only_resident_reclamation"]
     if timer_hop:
-        manifest["diagnostic"] = "marker_acquired_dtm_countdown_csa2_hopping_rx"
+        manifest["diagnostic"] = "marker_scan_acquired_dtm_countdown_csa2_hopping_rx"
         manifest["radio"].update(hci_test_channel=None, frequency_mhz=None, logical_channel=None,
                                  channel_selection_algorithm=2, channel_id=0xCF58,
                                  event_counter_initial=0, channel_map="all_37_data_channels",
                                  nominal_interval_us=20000, countdown_ticks_per_event=32,
+                                 preacquisition_scan="one_csa2_event_candidate_per_accepted_countdown_callback",
                                  acquisition="first_crc_valid_counter_marker",
                                  acquisition_index="payload_bytes_0_1_little_endian_u16",
                                  acquisition_suffix="payload_bytes_2_25_equal_2_through_25")
         manifest["pointer_installation"].update(countdown_table_slot=9,
                                                  countdown_slot_installed_by_phase_wrapper=True)
-        manifest["resident_offsets"].update(hop_advance=1024, hop_initial=1050, hop_trace=1096,
+        manifest["resident_offsets"].update(hop_advance=1024, hop_initial=1050, hop_trace=1100,
                                             countdown=1132, channel_config=1280, csa2=1408,
                                             marker_acquire=1536)
         manifest["diagnostic_trace"] = {
-            "offset": 1096,
+            "offset": 1100,
             "u32_fields": ["event_counter", "current_channel", "channel_configuration_count",
-                           "ticks_remaining", "accepted_countdown_callbacks", "completed_event_advances",
-                           "marker_synchronized"]
+                           "ticks_remaining", "accepted_countdown_callbacks", "synchronized_event_advances",
+                           "marker_synchronized", "preacquisition_scan_retunes"]
         }
         manifest["limitations"] = ["counter_marker_fixture_acquisition_not_BIGInfo_synchronization",
                                    "first_valid_marker_only_no_reacquisition", "one_lossy_snapshot_mailbox",
+                                   "preacquisition_scan_is_diagnostic_not_standard_discovery",
                                    "625us_DTM_scheduler_tick_is_static_not_measured_for_this_image",
                                    "retune_boundary_not_live_validated", "no_RF_loss_accounting",
                                    "no_standard_BIG_creation_CIS_or_encryption",
@@ -921,7 +920,7 @@ def main():
     parser.add_argument("--iso", action="store_true", help="one-shot task ISO delivery; requires --bis")
     parser.add_argument("--stream", action="store_true", help="rearm one mailbox and wake from RX; requires --bis --iso")
     parser.add_argument("--hop", action="store_true", help="open-loop CSA#2 retune after each stock RX callback; requires --stream")
-    parser.add_argument("--timer-hop", action="store_true", help="CSA#2 retune every 32 stock DTM scheduler ticks; requires --stream")
+    parser.add_argument("--timer-hop", action="store_true", help="scan CSA#2 candidates per tick, then retune every 32 ticks after marker acquisition; requires --stream")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-header", type=Path)
     parser.add_argument("--output-blob", type=Path, help="export --bis --iso image, allocator and ABI manifest")

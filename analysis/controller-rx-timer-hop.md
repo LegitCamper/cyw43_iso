@@ -11,28 +11,39 @@ completion. In RX mode the stock callback returns after its event/pending work;
 its transmit countdown path is skipped. The timer-hop phase wrapper replaces
 only the resident clone's slot `+0x24`, after calling stock phase setup.
 
-The replacement callback calls stock first, validates event `0x209788`,
-parameters `0x2097b8`, and RX mode, then advances one CSA#2 event every 32
-callbacks. Existing static timing evidence associates this scheduler countdown
-with nominal 625-us ticks, making 32 ticks nominally 20 ms. Receive callbacks
-never advance this timer counter.
+The replacement callback always calls stock first and validates event
+`0x209788`, parameters `0x2097b8`, and RX mode. Before marker synchronization,
+every accepted callback advances the 16-bit candidate event counter once and
+retunes to its CSA#2 channel. Existing static timing evidence associates these
+callbacks with nominal 625-us ticks. This fast diagnostic scan tries 32 CSA#2
+event candidates during one nominal 20-ms transmitter interval instead of
+waiting 20 ms on one wrong channel.
 
-Before synchronization, the timer still advances open loop. The first accepted
-26-byte diagnostic counter marker can acquire it: bytes 2..25 must equal
-`02..19`, while bytes 0..1 provide the little-endian 16-bit event index. The RX
-hook copies the payload, calls stock first, then atomically sets the event
-counter to that index, configures its CSA#2 channel, resets the countdown to 32,
-and publishes the synchronization word. Later packets cannot reacquire or move
-the phase. Timer advances retain that word across 16-bit event-counter wrap.
+The first accepted 26-byte diagnostic counter marker can acquire the scan:
+bytes 2..25 must equal `02..19`, while bytes 0..1 provide the little-endian
+16-bit event index. The RX hook copies the payload, calls stock first, then
+atomically sets the event counter to that index, configures its CSA#2 channel,
+resets the countdown to 32, and publishes the synchronization word. The
+acquisition channel configuration increments the common configuration count.
+Later packets cannot reacquire or move the phase.
+
+After synchronization, callbacks stop scanning. They decrement the 32-tick
+countdown and advance exactly one CSA#2 event at zero, preserving the marker
+synchronization word and scan count across 16-bit event-counter wrap. Receive
+callbacks never perform a post-acquisition event advance.
 
 This is marker-fixture acquisition, not BIGInfo-derived anchor synchronization.
 It assumes the received marker index identifies the current transmitter event
 and starts the next nominal interval at RX completion. It does not recover a
 Bluetooth broadcast anchor, measure controller timer phase, or parse BIGInfo.
+The pre-acquisition scan is not Bluetooth standard discovery and does not
+guarantee that every logical channel is visited during one transmitter event.
 
-The seven `u32` trace fields at resident offset 1096 are event counter, current
+The eight `u32` trace fields at resident offset 1100 are event counter, current
 channel, channel configuration count, ticks remaining, accepted countdown
-callbacks, completed event advances, and marker synchronized (`0` or `1`).
+callbacks, synchronized event advances, marker synchronized (`0` or `1`), and
+pre-acquisition scan retunes. Configuration count includes initial setup, every
+scan retune, marker acquisition retune, and every synchronized event retune.
 
 ## Checks
 
@@ -42,23 +53,26 @@ uv run --quiet --with unicorn python analysis/check-controller-rx.py \
   --output-blob work/iso-blob-rx-timer-hop
 ```
 
-Unicorn checks stock countdown chaining, callback guards, exactly one advance
-per 32 accepted ticks, timer progress with no RX callback, rejection of a
-non-marker payload, one-shot acquisition from a valid marker, 32-tick phase
-reset, interrupt-mask restoration, no RX-driven advance, and synchronized
-16-bit event-counter wrap. Phase emulation checks event-zero CSA#2
-configuration and installation of the resident countdown callback.
+Unicorn checks stock countdown chaining, callback guards, one CSA#2 scan retune
+per accepted unsynchronized tick, rejection of a non-marker payload, one-shot
+acquisition from a valid marker, acquisition configuration accounting, 32-tick
+phase reset, interrupt-mask restoration, no RX-driven advance, exactly one
+post-acquisition advance per 32 accepted ticks, and synchronized 16-bit counter
+wrap without clearing synchronization or scan telemetry. Phase emulation checks
+event-zero CSA#2 configuration and installation of the resident countdown
+callback.
 
 Generated image SHA-256 is
-`db0bb61072703378ce944975ab092c1b8ee34c1a3adf80e20aa9b46410bede82`.
+`5657f8bad24d5987d67788d46d79173b35a8f0ffbf84c69b9be34edbf0d43090`.
 Allocator SHA-256 is
 `dc1c2dfabb13f4a8de26ab8328de4def56944d2d646bbe65cf201295bdbc4d47`.
 
 ## Live gate
 
-No hardware run is claimed. Before promotion, measure countdown callback cadence
-and verify RF retuning occurs at a safe boundary while reception is active.
-Then run silent, correctly aligned hopping, and one-event-offset controls, with
-stock firmware restoration checks after each run. Sustained reception after a
-loss can validate this marker diagnostic, but only BIGInfo-derived anchor and
-interval handling can promote it to broadcast synchronization.
+No scan-enabled hardware run is claimed. Run silent, correctly aligned hopping,
+and one-event-offset controls, with stock firmware restoration checks after each
+run. Confirm scan telemetry grows before acquisition, synchronization changes to
+one only after a delivered marker, and synchronized advances then follow the
+32-tick cadence. Sustained reception after a loss can validate this marker
+diagnostic, but only BIGInfo-derived anchor and interval handling can promote it
+to broadcast synchronization.
