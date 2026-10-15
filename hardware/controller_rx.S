@@ -79,6 +79,9 @@ copy_window:
     strh r0,[r4,#38]
     ldrsb r0,[r6,#44]
     str r0,[r4,#40]
+.ifdef RX_TIMER_HOP
+    bl marker_acquire
+.endif
     dmb
     movs r0,#2
     str r0,[r4]
@@ -324,6 +327,7 @@ hop_timer_initial:
     movs r0,#0
     str r0,[r4,#16]
     str r0,[r4,#20]
+    str r0,[r4,#24]
     adr r0,timer_countdown
     orr r0,r0,#1
     adr r1,callbacks
@@ -331,8 +335,8 @@ hop_timer_initial:
     pop {r4,pc}
     .balign 4
 hop_trace:
-    .space 24
-    .space 1120-(.-hook),0
+    .space 28
+    .space 1132-(.-hook),0
 .thumb_func
 timer_countdown:
     push {r4-r8,lr}
@@ -395,6 +399,43 @@ rf_channel: .word 0x003186a4
 .thumb_func
 bis_channel:
     .incbin "work/bis-channel/bis_channel.bin"
+    .space 1536-(.-hook),0
+.thumb_func
+marker_acquire:
+    push {r4-r8,lr}
+    adr r4,hop_trace
+    ldr r0,[r4,#24]
+    cbnz r0,marker_done
+    adr r5,trace
+    add.w r5,r5,#48
+    movs r1,#2
+marker_validate:
+    ldrb r2,[r5,r1]
+    cmp r2,r1
+    bne marker_done
+    adds r1,#1
+    cmp r1,#26
+    bne marker_validate
+    mrs r7,PRIMASK
+    cpsid i
+    ldr r0,[r4,#24]
+    cbnz r0,marker_unlock
+    ldrh r0,[r5]
+    str r0,[r4]
+    bl configure_channel
+    str r0,[r4,#4]
+    ldr r0,[r4,#8]
+    adds r0,#1
+    str r0,[r4,#8]
+    movs r0,#32
+    str r0,[r4,#12]
+    movs r0,#1
+    dmb
+    str r0,[r4,#24]
+marker_unlock:
+    msr PRIMASK,r7
+marker_done:
+    pop {r4-r8,pc}
     .space 2048-(.-hook),0
 .else
     .space 1024-(.-hook),0
