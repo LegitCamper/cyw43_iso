@@ -1,0 +1,30 @@
+[package]
+name = "lc3-rp2040-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["rom-float"]
+rom-float = ["embassy-rp/intrinsics", "embassy-rp/rom-v2-intrinsics"]
+
+[dependencies]
+lc3-codec = { package = "cyw43-lc3-codec", path = "../../vendor/lc3-codec", default-features = false }
+embassy-rp = { version = "=0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
+embassy-time = "0.5.1"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = { version = "1", features = ["disable-blocking-mode"] }
+panic-probe = { version = "1", features = ["print-defmt"] }
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+[profile.release]
+opt-level = 3
+debug = 2
+lto = true
+codegen-units = 1
+

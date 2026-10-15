@@ -1,0 +1,9 @@
+[package]
+name = "cyw43-lc3-composition"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+cyw43-iso-re = { path = "../..", default-features = false, features = ["lc3"] }
+lc3-codec = "=0.2.0"
