@@ -47,6 +47,18 @@ def counter_result(before, status):
     after[index] = (after[index] + 1) & 0xFFFF
     return after
 
+def csa2_channel(counter, channel_id=0xcf58):
+    counter &= 0xffff
+    value = counter ^ channel_id
+    for _ in range(3):
+        value = (int(f"{value & 255:08b}"[::-1], 2)
+                 | (int(f"{value >> 8:08b}"[::-1], 2) << 8))
+        value = (17 * value + channel_id) & 65535
+    return (value ^ channel_id) % 37
+
+def rf_selector(channel):
+    return 0x80 | (2 * channel + (2 if channel <= 10 else 4))
+
 
 def check_capture(record, expected_header, expected_payload):
     assert type(record) is dict
@@ -307,15 +319,17 @@ def task_module():
     return module
 
 
-def build(bis=False, iso=False, stream=False):
+def build(bis=False, iso=False, stream=False, hop=False):
     assert not iso or bis, "ISO task delivery requires BIS variant"
     assert not stream or iso, "stream requires ISO task delivery"
+    assert not hop or stream, "hopping requires streaming ISO delivery"
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="controller-rx-") as directory:
         obj, elf, binary = (Path(directory) / name for name in ("rx.o", "rx.elf", "rx.bin"))
         subprocess.run(["arm-none-eabi-as", "-mcpu=cortex-m3", "-mthumb"]
                        + (["--defsym", "BIS_PACKET=1"] if bis else [])
-                       + (["--defsym", "RX_STREAM=1"] if stream else []) + [
+                       + (["--defsym", "RX_STREAM=1"] if stream else [])
+                       + (["--defsym", "RX_HOP=1"] if hop else []) + [
                         str(root / "hardware/controller_rx.S"), "-o", str(obj)], check=True)
         blobs = []
         for base in (0x209BAC, 0x217E78):
@@ -331,7 +345,12 @@ def build(bis=False, iso=False, stream=False):
                 assert values["bis_trace"] == base + 768
             if stream:
                 assert values["stream_forward"] == base + 912
-        assert blobs[0] == blobs[1] and len(blobs[0]) == (1024 if bis else 512)
+            if hop:
+                for name, offset in (("hop_advance", 1024), ("hop_initial", 1050), ("hop_trace", 1072),
+                                     ("configure_channel", 1152), ("bis_channel", 1280)):
+                    assert values[name] == base + offset, name
+        size = 2048 if hop else 1024 if bis else 512
+        assert blobs[0] == blobs[1] and len(blobs[0]) == size
         blob = blobs[0]
         rom = (root / "work/cyw43439-btrom-clean.bin").read_bytes()
         assert blob[256:300] == rom[0x8B634:0x8B660]
@@ -341,6 +360,10 @@ def build(bis=False, iso=False, stream=False):
         if bis:
             assert blob[404:416] == bytes(12)
             assert blob[768:912 if stream else 1024] == bytes(144 if stream else 256)
+            if hop:
+                assert blob[1084:1152] == bytes(68)
+                assert blob[1220:1280] == bytes(60)
+                assert blob[1400:] == bytes(648)
         else:
             assert blob[404:] == bytes(108)
         if iso:
@@ -350,7 +373,7 @@ def build(bis=False, iso=False, stream=False):
         return blob
 
 
-def emulate(blob, stream=False):
+def emulate(blob, stream=False, hop=False):
     import unicorn as un
     from unicorn import arm_const as arm
 
@@ -358,9 +381,11 @@ def emulate(blob, stream=False):
     registers = [getattr(arm, f"UC_ARM_REG_R{i}") for i in range(13)]
     base, event, params, rssip, stop, stack = 0x217E78, 0x209788, 0x2097B8, 0x206000, 0xF0000, 0x21D000
     trace = base + 320
+    hop_trace = base + 1072
     marker = bytes(range(32))
 
-    def run(status, primask=0, wrapped=True, bad=None, state=0, pending=0, ipsr=0, wrong_header=False, context=True):
+    def run(status, primask=0, wrapped=True, bad=None, state=0, pending=0, ipsr=0,
+            wrong_header=False, context=True, event_counter=0):
         cpu = un.Uc(un.UC_ARCH_ARM, un.UC_MODE_THUMB | un.UC_MODE_MCLASS)
         cpu.mem_map(0, 0x100000)
         cpu.mem_write(0, rom)
@@ -381,12 +406,16 @@ def emulate(blob, stream=False):
         put(0x201F1C, 0x206200 if context else 0)
         put(0x318014, 0x123456F8)
         put(0x31801C, 0x23456789)
+        current_channel = csa2_channel(event_counter) if hop else 0
         identity = {0x318B6C: 0x01302340, 0x318B70: 0x718EBED6,
-                    0x318BA4: 0x123401, 0x318BF4: 0, 0x3186A4: 0x82}
+                    0x318BA4: 0x123401, 0x318BF4: current_channel,
+                    0x3186A4: rf_selector(current_channel)}
         for address, value in identity.items():
             put(address, value)
         cpu.mem_write(0x370A00, marker)
         put(trace, state)
+        if hop:
+            cpu.mem_write(hop_trace, struct.pack("<3I", event_counter, current_channel, 1))
         incoming = [0x11000000 + i * 0x101 for i in range(13)]
         incoming[0] = event if bad != "event" else 0x209000
         for register, value in zip(registers, incoming):
@@ -451,7 +480,18 @@ def emulate(blob, stream=False):
         assert cpu.mem_read(base + 316, 4) == struct.pack("<I", 0x52585331)
         assert cpu.mem_read(base + 400, 4) == struct.pack("<I", 0x52585331)
         for address, value in identity.items():
-            assert bytes(cpu.mem_read(address, 4)) == struct.pack("<I", value), hex(address)
+            expected = value
+            if hop and wrapped and not skipped and address in (0x318BF4, 0x3186A4):
+                next_channel = csa2_channel((event_counter + 1) & 0xffff)
+                expected = next_channel if address == 0x318BF4 else rf_selector(next_channel)
+            actual = bytes(cpu.mem_read(address, 4))
+            assert actual == struct.pack("<I", expected), (hex(address), event_counter, actual.hex(), expected)
+        if hop:
+            advanced = int(wrapped and not skipped)
+            next_counter = (event_counter + advanced) & 0xffff
+            actual_hop = bytes(cpu.mem_read(hop_trace, 12))
+            expected_hop = struct.pack("<3I", next_counter, csa2_channel(next_counter), 1 + advanced)
+            assert actual_hop == expected_hop, (actual_hop.hex(), expected_hop.hex(), status, bad)
         result = [cpu.reg_read(register) for register in registers]
         result.append(cpu.reg_read(arm.UC_ARM_REG_APSR) & 0xF8000000)
         window_reads = [(address, size) for address, size in reads if 0x370000 <= address < 0x371000]
@@ -478,24 +518,42 @@ def emulate(blob, stream=False):
         return (result, bytes(cpu.mem_read(event, 48)), bytes(cpu.mem_read(params, 24)),
                 [(address, size, value) for address, size, value in writes if 0x318000 <= address < 0x319000])
 
+    def equivalent(arguments):
+        wrapped = run(**arguments)
+        stock = run(wrapped=False, **arguments)
+        if hop and arguments.get("bad") is None:
+            assert wrapped[:3] == stock[:3]
+            stock_mmio = stock[3]
+            wrapped_mmio = wrapped[3]
+            assert wrapped_mmio[:len(stock_mmio)] == stock_mmio
+            channel = csa2_channel((arguments.get("event_counter", 0) + 1) & 0xffff)
+            assert wrapped_mmio[len(stock_mmio):] == [
+                (0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+        else:
+            assert wrapped == stock
+
     for status in range(8):
         for mask in (0, 1):
-            assert run(status, mask) == run(status, mask, wrapped=False)
+            equivalent({"status": status, "primask": mask})
     for bad in ("event", "parameters", "mode"):
-        assert run(4, bad=bad) == run(4, wrapped=False, bad=bad)
+        equivalent({"status": 4, "bad": bad})
     for state in (1, 2):
-        assert run(4, state=state) == run(4, wrapped=False, state=state)
-    assert run(4, pending=1) == run(4, wrapped=False, pending=1)
-    assert run(4, ipsr=16) == run(4, wrapped=False, ipsr=16)
+        equivalent({"status": 4, "state": state})
+    equivalent({"status": 4, "pending": 1})
+    equivalent({"status": 4, "ipsr": 16})
+    if hop:
+        for counter in (0, 1, 0xfffe, 0xffff):
+            equivalent({"status": 4, "event_counter": counter})
     if stream:
         for state in (0, 1, 2):
             for status in range(8):
-                assert run(status, state=state, wrong_header=True) == run(status, state=state, wrong_header=True, wrapped=False)
-        assert run(4, context=False) == run(4, context=False, wrapped=False)
-    print("RX assembly passes: first-bit2 eligibility, stock branches, guards, wrap, repeated-call forwarding, ABI and MMIO equivalence.")
+                equivalent({"status": status, "state": state, "wrong_header": True})
+        equivalent({"status": 4, "context": False})
+    print("RX assembly passes: first-bit2 eligibility, stock branches, guards, wrap, repeated-call forwarding, ABI and MMIO equivalence"
+          + (", post-stock CSA#2 retune and event-counter wrap." if hop else "."))
 
 
-def emulate_phase(blob):
+def emulate_phase(blob, hop=False):
     import unicorn as un
     from unicorn import arm_const as arm
 
@@ -571,13 +629,19 @@ def emulate_phase(blob):
         assert cpu.mem_read(base + 316, 88) == blob[316:404]
         mmio = [(address, size, value) for address, size, value in writes if 0x318000 <= address < 0x319000]
         if wrapped and bad is None:
-            assert bytes(cpu.mem_read(0x3186A4, 4)) == struct.pack("<I", 0x82)
+            channel = csa2_channel(0) if hop else 0
+            assert bytes(cpu.mem_read(0x3186A4, 4)) == struct.pack("<I", rf_selector(channel))
             for address, value in identity.items():
-                assert bytes(cpu.mem_read(address, 4)) == struct.pack("<I", value), hex(address)
-            assert mmio[-4:] == [(0x318B70, 4, 0x718EBED6), (0x318BA4, 4, 0x123401),
-                                 (0x318B6C, 4, 0x01302340), (0x318BF4, 4, 0)]
+                expected = channel if hop and address == 0x318BF4 else value
+                assert bytes(cpu.mem_read(address, 4)) == struct.pack("<I", expected), hex(address)
+            expected_mmio = [(0x318B70, 4, 0x718EBED6), (0x318BA4, 4, 0x123401),
+                             (0x318B6C, 4, 0x01302340), (0x318BF4, 4, 0)]
+            if hop:
+                expected_mmio += [(0x318BF4, 4, channel), (0x3186A4, 4, rf_selector(channel))]
+                assert bytes(cpu.mem_read(base + 1072, 12)) == struct.pack("<3I", 0, channel, 1)
+            assert mmio[-len(expected_mmio):] == expected_mmio
             assert struct.unpack("<I", cpu.mem_read(base + 768, 4))[0] == (count + 1) & 0xFFFFFFFF
-            mmio = mmio[:-4]
+            mmio = mmio[:-len(expected_mmio)]
         else:
             assert bytes(cpu.mem_read(base + 768, 20)) == struct.pack("<I", count) + bytes(16)
         result = [cpu.reg_read(register) for register in registers]
@@ -588,15 +652,17 @@ def emulate_phase(blob):
             assert run(bad, primask=primask) == run(bad, wrapped=False, primask=primask)
     for count in (1, 0xFFFFFFFF):
         assert run(count=count) == run(wrapped=False, count=count)
-    print("BIS phase assembly passes: ROM setup, post-stock identity, guards, repeated phase, count wrap, ABI and ordered writes; RX rearm preserves identity with external helpers stubbed.")
+    print("BIS phase assembly passes: ROM setup, post-stock identity, guards, repeated phase, count wrap, ABI and ordered writes"
+          + ("; event zero starts on its CSA#2 channel." if hop else "; RX rearm preserves identity with external helpers stubbed."))
 
 
-def export_blob(directory, blob, stream=False):
+def export_blob(directory, blob, stream=False, hop=False):
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="rx-allocator-") as temporary:
         obj, elf, binary = [Path(temporary) / name for name in ("allocator.o", "allocator.elf", "allocator.bin")]
+        reservation = 2048 if hop else 1024
         subprocess.run(["arm-none-eabi-as", "-mcpu=cortex-m3", "-mthumb", "--defsym", "SRAM_EXEC_ALLOC=1",
-                        "--defsym", "SRAM_RESERVATION_SIZE=1024", str(root / "hardware/runtime_hook.S"),
+                        "--defsym", f"SRAM_RESERVATION_SIZE={reservation}", str(root / "hardware/runtime_hook.S"),
                         "-o", str(obj)], check=True)
         subprocess.run(["arm-none-eabi-ld", "-Ttext=0xd0f90", "--defsym=stock_hook=0xd035d",
                         "--defsym=arena_allocate=0x17857", "-e", "hook", str(obj), "-o", str(elf)], check=True)
@@ -605,15 +671,15 @@ def export_blob(directory, blob, stream=False):
     source = (root / "hardware/picow_runtime_probe.c").read_text()
     raw = re.search(r"uint8_t sram_allocator\[\] = \{(.*?)\};", source, re.S)[1]
     expected = bytearray(int(value.strip(), 0) for value in raw.split(",") if value.strip())
-    expected[56:58] = bytes.fromhex("8060")
-    assert allocator == expected and len(allocator) == 112 and len(blob) == 1024
+    expected[56:58] = bytes.fromhex("0060" if hop else "8060")
+    assert allocator == expected and len(allocator) == 112 and len(blob) == reservation
     manifest = {
         "abi_version": 1, "controller": "CYW43439", "firmware": "0065",
         "diagnostic": "one_shot_fixed_channel_rx", "runtime_install_required": True,
         "rom_sha256": "d5e271f20c80293be3561bb63e92ce4f6ca563ecca8fffd81eba639de9354038",
         "bootstrap_address": 0xD0F90, "bootstrap_requires_zero_reservation": True,
         "boot_firmware_sha256": "b3c0c99774135c32beea47af847838077a1f0b7a6be661a68ddcd3641362ad7d",
-        "allocation_bytes": 1024, "handle": 0x42, "sdu_octets": 26,
+        "allocation_bytes": reservation, "handle": 0x42, "sdu_octets": 26,
         "transport": {"direction": "controller_to_host", "hci_packet_type": 5,
                       "hci_iso_data_load_octets": 30, "packet_boundary_flag": 2,
                       "timestamp_flag": 0, "packet_status_flag": 0,
@@ -647,6 +713,18 @@ def export_blob(directory, blob, stream=False):
                                    "accepted_SDU_sequence_not_radio_sequence", "no_RF_loss_accounting",
                                    "ring_full_retry_requires_later_radio_callback", "no_standard_BIG_creation_CIS_or_encryption",
                                    "exclusive_stock_DTM_event_no_radio_coexistence", "reset_only_resident_reclamation"]
+    if hop:
+        manifest["diagnostic"] = "open_loop_csa2_hopping_rx"
+        manifest["radio"].update(hci_test_channel=None, frequency_mhz=None, logical_channel=None,
+                                 channel_selection_algorithm=2,
+                                 channel_id=0xCF58, event_counter_initial=0,
+                                 channel_map="all_37_data_channels")
+        manifest["resident_offsets"].update(hop_advance=1024, hop_initial=1050, hop_trace=1072,
+                                            channel_config=1152, csa2=1280)
+        manifest["limitations"] = ["open_loop_counter_without_BIGInfo_anchor", "one_lossy_snapshot_mailbox",
+                                   "counter_advances_once_per_stock_RX_callback", "no_RF_loss_accounting",
+                                   "no_standard_BIG_creation_CIS_or_encryption",
+                                   "exclusive_stock_DTM_event_no_radio_coexistence", "reset_only_resident_reclamation"]
     directory.mkdir(parents=True, exist_ok=True)
     for name, data in (("native.bin", blob), ("allocator.bin", allocator)):
         (directory / name).write_bytes(data)
@@ -669,6 +747,7 @@ def main():
     parser.add_argument("--bis", action="store_true", help="fixed-channel BIS-format RX variant")
     parser.add_argument("--iso", action="store_true", help="one-shot task ISO delivery; requires --bis")
     parser.add_argument("--stream", action="store_true", help="rearm one mailbox and wake from RX; requires --bis --iso")
+    parser.add_argument("--hop", action="store_true", help="open-loop CSA#2 retune after each stock RX callback; requires --stream")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-header", type=Path)
     parser.add_argument("--output-blob", type=Path, help="export --bis --iso image, allocator and ABI manifest")
@@ -677,6 +756,8 @@ def main():
         parser.error("--iso requires --bis")
     if args.stream and not args.iso:
         parser.error("--stream requires --bis --iso")
+    if args.hop and not args.stream:
+        parser.error("--hop requires --stream")
     if args.stream and (args.capture or args.probe_capture):
         parser.error("stream capture evidence uses the normal-runner stream checker")
     if args.output_blob and not args.iso:
@@ -695,7 +776,7 @@ def main():
         parser.error("positive capture requires --expected-header and --expected-payload")
     check_static()
     self_test()
-    blob = build(bis=args.bis, iso=args.iso, stream=args.stream)
+    blob = build(bis=args.bis, iso=args.iso, stream=args.stream, hop=args.hop)
     if args.output:
         args.output.write_bytes(blob)
     if args.output_header:
@@ -704,16 +785,16 @@ def main():
         args.output_header.write_text("/* Generated by analysis/check-controller-rx.py. */\n"
                                       f"static const uint8_t controller_rx[{len(blob)}] = {{\n" + "\n".join(rows) + "\n};\n")
     if args.emulate:
-        emulate(blob, stream=args.stream)
+        emulate(blob, stream=args.stream, hop=args.hop)
         if args.bis:
-            emulate_phase(blob)
+            emulate_phase(blob, hop=args.hop)
         if args.iso:
             task = task_module()
             task.check(blob[576:576 + len(task.build(stream=args.stream))], stream=args.stream)
             if args.stream:
                 task.check_interleaving(blob)
     if args.output_blob:
-        export_blob(args.output_blob, blob, stream=args.stream)
+        export_blob(args.output_blob, blob, stream=args.stream, hop=args.hop)
     if args.bad_crc:
         check_bad_crc(args.probe_capture.read_text(), args.peer_capture.read_text())
         print("CRC-init mismatch control passes: bit1 activity, no bit2 snapshot or HCI ISO delivery; general CRC/status semantics unproven.")

@@ -82,6 +82,9 @@ copy_window:
     dmb
     movs r0,#2
     str r0,[r4]
+.ifdef RX_HOP
+    bl hop_advance
+.endif
 .ifdef RX_STREAM
     bl stream_wake
 .endif
@@ -170,6 +173,9 @@ bis_phase:
     ldr r1,[r4]
     adds r1,#1
     str r1,[r4]
+.ifdef RX_HOP
+    bl hop_initial
+.endif
     pop.w {r0-r3,r12,lr}
     msr APSR_nzcvq,r8
     pop.w {r4-r8,pc}
@@ -197,6 +203,9 @@ stream_forward:
     blx r7
     push.w {r0-r3,r12,lr}
     mrs r8,APSR
+.ifdef RX_HOP
+    bl hop_advance
+.endif
     bl stream_wake
     b.w rx_return
 .thumb_func
@@ -222,7 +231,66 @@ stream_stock: .word 0x0007143f
 transport_context: .word 0x00201f1c
 event_or: .word 0x00009061
 .endif
+.ifdef RX_HOP
     .space 1024-(.-hook),0
+.thumb_func
+hop_advance:
+    push {r4,lr}
+    adr r4,hop_trace
+    ldr r0,[r4]
+    adds r0,#1
+    uxth r0,r0
+    str r0,[r4]
+    bl configure_channel
+    str r0,[r4,#4]
+    ldr r0,[r4,#8]
+    adds r0,#1
+    str r0,[r4,#8]
+    pop {r4,pc}
+.thumb_func
+hop_initial:
+    push {r4,lr}
+    adr r4,hop_trace
+    movs r0,#0
+    str r0,[r4]
+    bl configure_channel
+    str r0,[r4,#4]
+    movs r0,#1
+    str r0,[r4,#8]
+    pop {r4,pc}
+    .balign 4
+hop_trace:
+    .space 12
+    .space 1152-(.-hook),0
+.thumb_func
+configure_channel:
+    push {r4,lr}
+    movw r1,#0xcf58
+    bl bis_channel
+    mov r2,r0
+    ldr r1,whitening_channel
+    str r2,[r1]
+    lsls r1,r2,#1
+    cmp r2,#10
+    ite ls
+    addls r1,r1,#2
+    addhi r1,r1,#4
+    orr r1,r1,#0x80
+    ldr r0,rf_channel
+    str r1,[r0]
+    mov r0,r2
+    pop {r4,pc}
+    .balign 4
+whitening_channel: .word 0x00318bf4
+rf_channel: .word 0x003186a4
+    .space 1280-(.-hook),0
+.thumb_func
+bis_channel:
+    .incbin "work/bis-channel/bis_channel.bin"
+    .space 2048-(.-hook),0
+.else
+    .space 1024-(.-hook),0
+.endif
 .else
     .space 512-(.-hook),0
 .endif
