@@ -175,6 +175,10 @@ bis_phase:
     str r1,[r4]
 .ifdef RX_HOP
     bl hop_initial
+.else
+.ifdef RX_TIMER_HOP
+    bl hop_timer_initial
+.endif
 .endif
     pop.w {r0-r3,r12,lr}
     msr APSR_nzcvq,r8
@@ -289,7 +293,112 @@ bis_channel:
     .incbin "work/bis-channel/bis_channel.bin"
     .space 2048-(.-hook),0
 .else
+.ifdef RX_TIMER_HOP
     .space 1024-(.-hook),0
+.thumb_func
+hop_advance:
+    push {r4,lr}
+    adr r4,hop_trace
+    ldr r0,[r4]
+    adds r0,#1
+    uxth r0,r0
+    str r0,[r4]
+    bl configure_channel
+    str r0,[r4,#4]
+    ldr r0,[r4,#8]
+    adds r0,#1
+    str r0,[r4,#8]
+    pop {r4,pc}
+.thumb_func
+hop_timer_initial:
+    push {r4,lr}
+    adr r4,hop_trace
+    movs r0,#0
+    str r0,[r4]
+    bl configure_channel
+    str r0,[r4,#4]
+    movs r0,#1
+    str r0,[r4,#8]
+    movs r0,#32
+    str r0,[r4,#12]
+    movs r0,#0
+    str r0,[r4,#16]
+    str r0,[r4,#20]
+    adr r0,timer_countdown
+    orr r0,r0,#1
+    adr r1,callbacks
+    str r0,[r1,#36]
+    pop {r4,pc}
+    .balign 4
+hop_trace:
+    .space 24
+    .space 1120-(.-hook),0
+.thumb_func
+timer_countdown:
+    push {r4-r8,lr}
+    mov r4,r0
+    ldr r5,stock_countdown
+    blx r5
+    ldr r5,timer_event
+    cmp r4,r5
+    bne timer_done
+    ldr r5,[r4,#28]
+    ldr r6,timer_parameters
+    cmp r5,r6
+    bne timer_done
+    ldrb r5,[r5,#6]
+    cmp r5,#1
+    bne timer_done
+    adr r4,hop_trace
+    ldr r5,[r4,#16]
+    adds r5,#1
+    str r5,[r4,#16]
+    ldr r5,[r4,#12]
+    subs r5,#1
+    str r5,[r4,#12]
+    bne timer_done
+    movs r5,#32
+    str r5,[r4,#12]
+    bl hop_advance
+    ldr r5,[r4,#20]
+    adds r5,#1
+    str r5,[r4,#20]
+timer_done:
+    pop {r4-r8,pc}
+    .balign 4
+stock_countdown: .word 0x000713fd
+timer_event: .word 0x00209788
+timer_parameters: .word 0x002097b8
+    .space 1280-(.-hook),0
+.thumb_func
+configure_channel:
+    push {r4,lr}
+    movw r1,#0xcf58
+    bl bis_channel
+    mov r2,r0
+    ldr r1,whitening_channel
+    str r2,[r1]
+    lsls r1,r2,#1
+    cmp r2,#10
+    ite ls
+    addls r1,r1,#2
+    addhi r1,r1,#4
+    orr r1,r1,#0x80
+    ldr r0,rf_channel
+    str r1,[r0]
+    mov r0,r2
+    pop {r4,pc}
+    .balign 4
+whitening_channel: .word 0x00318bf4
+rf_channel: .word 0x003186a4
+    .space 1408-(.-hook),0
+.thumb_func
+bis_channel:
+    .incbin "work/bis-channel/bis_channel.bin"
+    .space 2048-(.-hook),0
+.else
+    .space 1024-(.-hook),0
+.endif
 .endif
 .else
     .space 512-(.-hook),0
