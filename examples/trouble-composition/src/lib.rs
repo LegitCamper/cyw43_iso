@@ -3,7 +3,7 @@
 use cyw43_iso_re::{
     bap::{AseCommand, ControlResponse, ProfileError},
     lc3::{CodecError, Decoder},
-    le_audio::Lc3Config,
+    proto::ltv::Lc3Config,
 };
 use trouble_audio::{
     DiscoveryError,

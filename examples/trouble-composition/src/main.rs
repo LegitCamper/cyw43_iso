@@ -1,8 +1,8 @@
 use cyw43_iso_re::{
     bap::AseCommand,
-    broadcast::{SingleBisBase, broadcast_audio_announcement},
     lc3::{Complex, Decoder, Encoder},
-    le_audio::Lc3Config,
+    proto::broadcast::{SingleBisBase, broadcast_audio_announcement},
+    proto::ltv::Lc3Config,
 };
 use cyw43_trouble_composition::{ReceiveError, decode_received};
 use trouble_audio::{

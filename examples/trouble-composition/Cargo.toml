@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 cyw43-iso-re = { path = "../..", default-features = false, features = ["lc3"] }
-trouble_audio = { git = "https://github.com/LegitCamper/trouble_audio", rev = "a6a374c6c42997d46c6a7ad2badd9bef103afe11" }
-trouble-host = { git = "https://github.com/LegitCamper/trouble", rev = "1f154caf2c4e1fb46bfcec0677c8545457c9b85b" }
+trouble_audio = { git = "https://github.com/LegitCamper/trouble_audio", rev = "f23b2246e529ba5ec2175d2227376328e8d8db39" }
+trouble-host = { git = "https://github.com/LegitCamper/trouble", rev = "e5ba6c5392347221fcbd49b1ff31236f30c9bfa7" }
 embassy-time = { version = "0.5.1", features = ["std", "generic-queue-8"] }
 critical-section = { version = "1", features = ["std"] }
 

@@ -163,9 +163,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cyw43-controller-proto"
+version = "0.1.0"
+
+[[package]]
 name = "cyw43-iso-re"
 version = "0.1.0"
 dependencies = [
+ "cyw43-controller-proto",
  "cyw43-lc3-codec",
 ]
 
@@ -802,7 +807,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "trouble-host"
 version = "0.8.0"
-source = "git+https://github.com/LegitCamper/trouble?rev=1f154caf2c4e1fb46bfcec0677c8545457c9b85b#1f154caf2c4e1fb46bfcec0677c8545457c9b85b"
+source = "git+https://github.com/LegitCamper/trouble?rev=e5ba6c5392347221fcbd49b1ff31236f30c9bfa7#e5ba6c5392347221fcbd49b1ff31236f30c9bfa7"
 dependencies = [
  "bt-hci",
  "embassy-crypto",
@@ -821,7 +826,7 @@ dependencies = [
 [[package]]
 name = "trouble-host-macros"
 version = "0.6.0"
-source = "git+https://github.com/LegitCamper/trouble?rev=1f154caf2c4e1fb46bfcec0677c8545457c9b85b#1f154caf2c4e1fb46bfcec0677c8545457c9b85b"
+source = "git+https://github.com/LegitCamper/trouble?rev=e5ba6c5392347221fcbd49b1ff31236f30c9bfa7#e5ba6c5392347221fcbd49b1ff31236f30c9bfa7"
 dependencies = [
  "convert_case",
  "darling",
@@ -834,7 +839,7 @@ dependencies = [
 [[package]]
 name = "trouble_audio"
 version = "0.1.0"
-source = "git+https://github.com/LegitCamper/trouble_audio?rev=a6a374c6c42997d46c6a7ad2badd9bef103afe11#a6a374c6c42997d46c6a7ad2badd9bef103afe11"
+source = "git+https://github.com/LegitCamper/trouble_audio?rev=f23b2246e529ba5ec2175d2227376328e8d8db39#f23b2246e529ba5ec2175d2227376328e8d8db39"
 dependencies = [
  "aes",
  "bitflags",
