@@ -40,6 +40,22 @@ index 0 is loaded before the ready log. Updates occur between completed radio
 transmissions, with a compiler fence and DMB before TX. Check the configuration
 with `--counter`; receiver capture must independently verify all indices.
 
+Feature `marker-lc3` also implies `marker-iso` and cycles the checked 520-byte,
+20-frame BAP 8_2 fixture (`audio.lc3`) at the same approximate 10-ms [NAME_b771624e1e25]
+cadence. It is the fixed-channel source for `trouble_audio`'s experimental
+`rp-pico-w/cyw43_iso_sink` example. The receiver decodes each 26-byte SDU and
+blinks its onboard LED while audio arrives. Build and inspect its transmitter
+log with:
+
+```sh
+cargo build --release --target thumbv8m.main-none-eabihf --bin marker-tx --features marker-lc3
+python3 check-marker-tx.py capture.txt --lc3
+```
+
+This is a bounded raw-radio fixture, not a standard advertising, periodic-sync,
+or BIG source. The fixture lets the CYW43439 fixed-channel LC3 receive and host
+decode path be validated independently before BIGInfo synchronization exists.
+
 `DTM_RX ready` confirms crystal/init completed; `waiting` reports RADIO state,
 READY and ADDRESS events. Packet logs include both successful and failed CRCs.
 Diagnostics use unfiltered `defmt::println!`, requiring no `DEFMT_LOG` build

@@ -16,6 +16,7 @@ marker-bis = []
 marker-iso = ["marker-bis"]
 marker-bad-crc = ["marker-iso"]
 marker-counter = ["marker-iso"]
+marker-lc3 = ["marker-iso"]
 marker-hop = ["marker-counter"]
 marker-hop-offset = ["marker-hop"]
 

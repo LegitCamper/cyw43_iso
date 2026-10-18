@@ -11,6 +11,9 @@ use {defmt_rtt as _, panic_probe as _};
 #[repr(align(4))]
 struct Packet([u8; 36]);
 
+#[cfg(feature = "marker-lc3")]
+const AUDIO: &[u8; 520] = include_bytes!("../../audio.lc3");
+
 /// First subevent channel of one BIS event, full 37-channel map.
 #[cfg(feature = "marker-hop")]
 fn hop_channel(counter: u16) -> u8 {
@@ -23,7 +26,11 @@ fn hop_channel(counter: u16) -> u8 {
 // Receivers derive the channel from the event counter, so an offset
 // transmitter must land on a different channel to be a real negative control.
 #[cfg(feature = "marker-hop")]
-const COUNTER_OFFSET: u16 = if cfg!(feature = "marker-hop-offset") { 1 } else { 0 };
+const COUNTER_OFFSET: u16 = if cfg!(feature = "marker-hop-offset") {
+    1
+} else {
+    0
+};
 
 #[cfg(feature = "marker-hop")]
 fn tune(radio: pac::radio::Radio, channel: u8) {
@@ -70,6 +77,8 @@ fn main() -> ! {
     if cfg!(feature = "marker-counter") {
         packet.0[2..4].copy_from_slice(&0u16.to_le_bytes());
     }
+    #[cfg(feature = "marker-lc3")]
+    packet.0[2..28].copy_from_slice(&AUDIO[..26]);
     let (frequency, access_address, crc_init, whitening) = if cfg!(feature = "marker-bis") {
         (4, 0x718e_bed6u32, 0x123401, true)
     } else {
@@ -132,6 +141,8 @@ fn main() -> ! {
     if cfg!(feature = "marker-counter") {
         defmt::println!("DTM_TX counter first=0 count=500 payload-offset=0 width=2 endian=little");
     }
+    #[cfg(feature = "marker-lc3")]
+    defmt::println!("DTM_TX lc3 frames=20 octets=26 sample-rate-hz=8000 frame-us=10000");
     #[cfg(feature = "marker-hop")]
     {
         tune(radio, hop_channel(COUNTER_OFFSET));
@@ -147,6 +158,11 @@ fn main() -> ! {
     for sent in 1u16..=500 {
         if cfg!(feature = "marker-counter") {
             packet.0[2..4].copy_from_slice(&(sent - 1).to_le_bytes());
+        }
+        #[cfg(feature = "marker-lc3")]
+        {
+            let frame = usize::from((sent - 1) % 20) * 26;
+            packet.0[2..28].copy_from_slice(&AUDIO[frame..frame + 26]);
         }
         // Retune before arming: the radio latches frequency at TXEN.
         #[cfg(feature = "marker-hop")]

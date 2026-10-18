@@ -16,7 +16,7 @@ def csa2_first(counter):
     return (value ^ CHANNEL_ID) % 37
 
 
-def check(text, offset, bis=False, length=31, bad_crc=False, counter=False, hop=None):
+def check(text, offset, bis=False, length=31, bad_crc=False, counter=False, hop=None, lc3=False):
     assert "failed" not in text and "panicked" not in text
     config = ("mhz=2404 mode=BLE1M aa=718ebed6 crc_init=123401 whitening=true"
               if bis else "mhz=2402 mode=BLE1M aa=71764129 crc_init=555555 whitening=false")
@@ -30,9 +30,19 @@ def check(text, offset, bis=False, length=31, bad_crc=False, counter=False, hop=
     if counter:
         assert bis and length == 26
         expected = b"\0\0" + expected[2:]
+    if lc3:
+        assert bis and length == 26 and not counter and hop is None
+        audio = (Path(__file__).with_name("audio.lc3")).read_bytes()
+        assert len(audio) == 520
+        expected = audio[:26]
     assert payload == expected, "wrong marker payload"
     counter_config = "DTM_TX counter first=0 count=500 payload-offset=0 width=2 endian=little"
     assert text.count("DTM_TX counter ") == int(counter), "unexpected counter configuration"
+    lc3_config = "DTM_TX lc3 frames=20 octets=26 sample-rate-hz=8000 frame-us=10000"
+    assert text.count("DTM_TX lc3 ") == int(lc3), "unexpected LC3 configuration"
+    if lc3:
+        assert text.count(lc3_config) == 1
+        assert text.index("DTM_TX ready") < text.index(lc3_config) < text.index("DTM_TX done")
     if counter:
         assert text.count(counter_config) == 1
         assert text.index("DTM_TX ready") < text.index(counter_config) < text.index("DTM_TX done")
@@ -67,6 +77,12 @@ def self_check():
         counter_text = iso_text.replace(f"payload=[{offset:02x}, {offset + 1:02x}", "payload=[00, 00").replace(
             "DTM_TX done", "DTM_TX counter first=0 count=500 payload-offset=0 width=2 endian=little\nDTM_TX done")
         check(counter_text, offset, bis=True, length=26, counter=True)
+        audio = Path(__file__).with_name("audio.lc3").read_bytes()
+        lc3_text = iso_text.replace(
+            ", ".join(f"{value:02x}" for value in range(offset, offset + 26)),
+            ", ".join(f"{value:02x}" for value in audio[:26]),
+        ).replace("DTM_TX done", "DTM_TX lc3 frames=20 octets=26 sample-rate-hz=8000 frame-us=10000\nDTM_TX done")
+        check(lc3_text, offset, bis=True, length=26, lc3=True)
         for bad in (counter_text.replace("count=500", "count=499"), counter_text.replace("endian=little", "endian=big")):
             try:
                 check(bad, offset, bis=True, length=26, counter=True)
@@ -120,13 +136,14 @@ if __name__ == "__main__":
     parser.add_argument("--iso", action="store_true", help="26-byte BIS-identity marker")
     parser.add_argument("--bad-crc", action="store_true", help="26-byte marker with one CRC-init bit toggled")
     parser.add_argument("--counter", action="store_true", help="26-byte markers with LE u16 packet indices")
+    parser.add_argument("--lc3", action="store_true", help="cycle the checked 20-frame LC3 fixture")
     parser.add_argument("--hop", type=int, choices=(0, 1), default=None,
                         help="CSA#2 hopping markers with this event-counter offset")
     args = parser.parse_args()
     self_check()
     if args.capture:
         counter = args.counter or args.hop is not None
-        iso = args.iso or args.bad_crc or counter
+        iso = args.iso or args.bad_crc or counter or args.lc3
         check(args.capture.read_text(), 128 if args.alternate else 0, args.bis or iso,
-              26 if iso else 31, args.bad_crc, counter, args.hop)
+              26 if iso else 31, args.bad_crc, counter, args.hop, args.lc3)
     print("Bounded marker transmitter capture check passes")
